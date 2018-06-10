@@ -1,18 +1,23 @@
 #define _GNU_SOURCE
 #define FUSE_USE_VERSION 31
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
+#include "utils.h"
+#include <archive.h>
+#include <archive_entry.h>
 #include <dirent.h>
 #include <errno.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <fcntl.h>
-
 #include <fuse.h>
+#include <libgen.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#define ROOT "/home/narhen/tmp"
 
 struct dir {
     DIR *dp;
@@ -27,16 +32,12 @@ static inline struct data *get_data(void)
     return (struct data *)fuse_get_context()->private_data;
 }
 
-static inline int root_fd(void)
-{
-    return get_data()->root;
-}
+static inline int root_fd(void) { return get_data()->root; }
 
 static inline struct file *get_file(struct fuse_file_info *fi)
 {
     return (struct file *)(uintptr_t)fi->fh;
 }
-
 
 static const char *get_path(const char *path)
 {
@@ -65,7 +66,6 @@ int do_open(const char *path, struct fuse_file_info *fi)
     int fd;
 
     fd = open_file(path, fi->flags);
-    fprintf(stderr, "OPEN %s, %d\n", path, fd);
     if (fd == -1)
         return -errno;
     fi->fh = (uintptr_t)fd;
@@ -92,8 +92,8 @@ int do_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_
     return res;
 }
 
-int do_read_buf(const char *path, struct fuse_bufvec **bufp, size_t size, 
-        off_t offset, struct fuse_file_info *fi)
+int do_read_buf(const char *path, struct fuse_bufvec **bufp, size_t size, off_t offset,
+    struct fuse_file_info *fi)
 {
     struct fuse_bufvec *buf;
     int fd;
@@ -141,23 +141,92 @@ int do_releasedir(const char *path, struct fuse_file_info *fi)
     return 0;
 }
 
-int do_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, 
-        struct fuse_file_info *fi, enum fuse_readdir_flags flags)
+static struct archive *_get_archive(const char *abspath)
+{
+    struct archive *a;
+
+    a = archive_read_new();
+    archive_read_support_filter_all(a);
+    archive_read_support_format_all(a);
+
+    if (archive_read_open_filename(a, abspath, 1024) != ARCHIVE_OK) {
+        archive_read_free(a);
+        return NULL;
+    }
+
+    return a;
+}
+
+static struct archive *get_archive(const char *root, const char *path, const char *name)
+{
+    char filename[strlen(ROOT) + strlen(path) + strlen(name) + 3];
+
+    sprintf(filename, "%s/%s/%s", root, path, name);
+    return _get_archive(filename);
+}
+
+static int fill_compressed_files(
+    void *buf, fuse_fill_dir_t filler, const char *path, struct dirent *dirents, int num_dirents)
+{
+    int i, dirent_size;
+    struct dirent *curr_ent = dirents;
+    struct archive *a;
+    struct archive_entry *ent;
+    char filename[1024];
+
+    dirent_size = struct_dirent_size(path);
+
+    for (i = 0; i < num_dirents; ++i, curr_ent = dirent_array_next(curr_ent, dirent_size)) {
+        a = get_archive(ROOT, path, curr_ent->d_name);
+        if (a == NULL)
+            return -errno;
+        while (archive_read_next_header(a, &ent) == ARCHIVE_OK) {
+            sprintf(filename, "%s:%s", curr_ent->d_name, archive_entry_pathname(ent));
+            if (filler(buf, filename, NULL, 0, 0)) {
+                archive_read_free(a);
+                return 0;
+            }
+        }
+    }
+
+    archive_read_free(a);
+    return 0;
+}
+
+int do_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
+    struct fuse_file_info *fi, enum fuse_readdir_flags flags)
 {
     DIR *dp = (DIR *)fi->fh;
-    struct dirent *de;
+    int num_dirents = 8, curr_dirent = 0;
+    int ret = 0, dirent_size = struct_dirent_size(get_path(path));
+    struct dirent *curr, *result, *dirents = calloc(num_dirents, dirent_size);
     struct stat st;
 
     fprintf(stderr, "readdir %d, %p, %s, %p\n", getpid(), fi, path, dp);
 
-    while ((de = readdir(dp))) {
+    for (result = curr = dirents; readdir_r(dp, curr, &result) == 0 && result != NULL;
+         curr = dirent_array_entry(dirents, dirent_size, curr_dirent)) {
         memset(&st, 0, sizeof(st));
-        st.st_ino = de->d_ino;
-        st.st_mode = de->d_type << 12;
-        if (filler(buf, de->d_name, &st, 0, 0))
-            return 0;
+        st.st_ino = curr->d_ino;
+        st.st_mode = curr->d_type << 12;
+        if (filler(buf, curr->d_name, &st, 0, 0))
+            goto done;
+
+        if (!endswith(curr->d_name, ".tar.bz2"))
+            continue;
+
+        if (++curr_dirent < num_dirents)
+            continue;
+
+        num_dirents *= 2;
+        dirents = realloc(dirents, num_dirents * dirent_size);
     }
-    return 0;
+
+    ret = fill_compressed_files(buf, filler, get_path(path), dirents, curr_dirent);
+
+done:
+    free(dirents);
+    return ret;
 }
 
 int do_getattr(const char *path, struct stat *info, struct fuse_file_info *fi)
@@ -183,9 +252,8 @@ static struct fuse_operations ops = {
 int main(int argc, char *argv[])
 {
     struct data d;
-    char *root = "/home/narhen/";
 
-    d.root = open(root, O_PATH);
+    d.root = open(ROOT, O_PATH);
 
     return fuse_main(argc, argv, &ops, &d);
 }
