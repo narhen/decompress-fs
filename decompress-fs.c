@@ -117,7 +117,7 @@ int do_opendir(const char *path, struct fuse_file_info *fi)
 {
     int fd;
     DIR *dp;
-    
+
     fd = open_file(path, fi->flags);
     fprintf(stderr, "   opendir %d, %p, %s, %p\n", getpid(), fi, path, (DIR *)fi->fh);
     if (fd == -1)
@@ -229,13 +229,75 @@ done:
     return ret;
 }
 
+static const char *find_filename_in_archive(const char *filename)
+{
+    const char *ret = strrchr(filename, ':');
+
+    if (!ret)
+        return NULL;
+    return ret + 1;
+}
+
+static char *find_archive_for_file(const char *filename)
+{
+    struct stat info;
+    char *p;
+    char abspath[strlen(ROOT) + strlen(filename) + 2];
+
+    sprintf(abspath, "%s/%s", ROOT, filename);
+
+    while ((p = strrchr(abspath, ':'))) {
+        *p = 0;
+        if (!lstat(abspath, &info))
+            return strdup(abspath);
+    }
+
+    return NULL;
+}
+
+static int archive_stat(const char *archive_filename, struct stat *info)
+{
+    char *archive_name = find_archive_for_file(archive_filename);
+    const char *filename = find_filename_in_archive(archive_filename);
+    struct archive *archive;
+    struct archive_entry *ent_iter, *correct_ent = NULL;
+    int ret = 0;
+
+    if (!archive_name)
+        return -EACCES;
+
+    archive = _get_archive(archive_name);
+    while (archive_read_next_header(archive, &ent_iter) == ARCHIVE_OK) {
+        if (!strcmp(filename, archive_entry_pathname(ent_iter))) {
+            correct_ent = ent_iter;
+            break;
+        }
+    }
+
+    if (correct_ent) {
+        memcpy(info, archive_entry_stat(correct_ent), sizeof(*info));
+        ret = 0;
+    } else
+        ret = -EACCES;
+
+    free(archive_name);
+    archive_read_free(archive);
+    return ret;
+}
+
 int do_getattr(const char *path, struct stat *info, struct fuse_file_info *fi)
 {
+    int ret;
     fprintf(stderr, "getattr %p, %s, %s\n", fi, path, get_path(path));
 
     if (fi)
         return fstat(fi->fh, info);
-    return fstatat(root_fd(), get_path(path), info, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+
+    ret = fstatat(root_fd(), get_path(path), info, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+    if (!ret)
+        return ret;
+
+    return archive_stat(path, info);
 }
 
 static struct fuse_operations ops = {
