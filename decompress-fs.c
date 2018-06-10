@@ -19,11 +19,16 @@
 
 #define ROOT "/home/narhen/tmp"
 
+struct virtual_file {
+    struct archive *archive;
+    struct archive_entry *archive_entry;
+};
+
 struct file {
     int fd;
     DIR *dp;
-    struct archive *archive;
-    struct archive_entry *archive_entry;
+
+    struct virtual_file *vfile;
 };
 
 struct data {
@@ -118,8 +123,10 @@ static struct archive_entry *find_archive_entry(struct archive *a, const char *f
 
 static void free_file(struct file *f)
 {
-    if (f->archive)
-        archive_read_free(f->archive);
+    if (f->vfile) {
+        archive_read_free(f->vfile->archive);
+        free(f->vfile);
+    }
 
     if (f->dp)
         closedir(f->dp);
@@ -134,6 +141,7 @@ static struct file *open_file(const char *path, int flags)
     const char *filename, *p = get_path(path);
     char *archive_name;
     struct file *file;
+    struct virtual_file *vfile;
 
     file = calloc(1, sizeof(struct file));
     if (!file)
@@ -145,20 +153,28 @@ static struct file *open_file(const char *path, int flags)
 
     archive_name = find_archive_for_file(path);
     if (!archive_name) {
-        free(file);
+        free_file(file);
         return NULL;
     }
 
-    file->archive = _get_archive(archive_name);
+    vfile = malloc(sizeof(struct virtual_file));
+    if (!vfile) {
+        free_file(file);
+        return NULL;
+    }
+
+    vfile->archive = _get_archive(archive_name);
     free(archive_name);
 
-    if (!file->archive) {
+    if (!vfile->archive) {
         free(file);
         return NULL;
     }
 
     filename = get_virtual_archive_file_name(p);
-    file->archive_entry = find_archive_entry(file->archive, filename);
+    vfile->archive_entry = find_archive_entry(vfile->archive, filename);
+
+    file->vfile = vfile;
 
     return file;
 }
@@ -173,7 +189,7 @@ int do_open(const char *path, struct fuse_file_info *fi)
     if (!file)
         return -errno;
 
-    fprintf(stderr, "\tfd = %d\n", file->fd);
+    fprintf(stderr, "\tfd = %d, vfile = %p\n", file->fd, file->vfile);
 
     fi->fh = (uintptr_t)file;
 
@@ -184,7 +200,7 @@ int do_release(const char *path, struct fuse_file_info *fi)
 {
     struct file *f = (struct file *)fi->fh;
 
-    fprintf(stderr, "release %s, %p, %d\n", path, f, f->fd);
+    fprintf(stderr, "release %s, %p, %d, %p\n", path, f, f->fd, f->vfile);
     free_file(f);
 
     return 0;
@@ -204,6 +220,63 @@ int do_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_
     return res;
 }
 
+static int read_vfile_buf(
+    struct fuse_bufvec **bufp, size_t size, off_t offset, struct virtual_file *file)
+{
+    struct fuse_bufvec *bufs;
+    struct fuse_buf *ptr;
+    int bytes_read, ret = 0, res, curr_buf, num_bufs = 1;
+    off_t off;
+    size_t block_size;
+    void *mem;
+
+    fprintf(stderr, "read_vfile_buf: %lu, %lu, %p\n", size, offset, file);
+
+    bufs = calloc(1, sizeof(struct fuse_bufvec));
+    if (!bufs)
+        return -1;
+
+    for (bytes_read = curr_buf = 0; bytes_read < size; ++curr_buf) {
+        res = archive_read_data_block(file->archive, (const void **)&mem, &block_size, &off);
+        if (res == ARCHIVE_EOF) {
+            printf("reached EOF in archive for file %s\n",
+                archive_entry_pathname(file->archive_entry));
+            ret = 0;
+            break;
+        } else if (res == ARCHIVE_FATAL) {
+            printf("FATAL when reading archive file %s\n",
+                archive_entry_pathname(file->archive_entry));
+            ret = -1;
+            break;
+        }
+
+        if (curr_buf > num_bufs) {
+            num_bufs *= 2;
+            bufs = realloc(bufs, sizeof(struct fuse_bufvec) + num_bufs * sizeof(struct fuse_buf));
+            if (!bufs)
+                return -1;
+        }
+
+        ptr = bufs->buf + curr_buf;
+        ptr->size = block_size;
+        ptr->mem = calloc(1, ptr->size);
+        if (!ptr->mem)
+            return -errno; // TODO: should probably free buffers here
+
+        memcpy(ptr->mem, mem, ptr->size);
+        bytes_read += ptr->size;
+
+        fprintf(stderr, "read_vfile_buf: read %lu bytes of data into buffer at address %p ('%s')\n",
+            ptr->size, ptr->mem, (char *)ptr->mem);
+    }
+
+    bufs->count = num_bufs;
+    fprintf(stderr, "num bufs: %lu\n", bufs->count);
+    *bufp = bufs;
+
+    return ret;
+}
+
 int do_read_buf(const char *path, struct fuse_bufvec **bufp, size_t size, off_t offset,
     struct fuse_file_info *fi)
 {
@@ -212,6 +285,9 @@ int do_read_buf(const char *path, struct fuse_bufvec **bufp, size_t size, off_t 
 
     file = (struct file *)fi->fh;
     fprintf(stderr, "read_buf %lu, from %d\n", size, file->fd);
+
+    if (file->vfile)
+        return read_vfile_buf(bufp, size, offset, file->vfile);
 
     buf = malloc(sizeof(struct fuse_bufvec));
     if (!buf)
@@ -325,7 +401,17 @@ done:
     return ret;
 }
 
-static int archive_stat(const char *archive_filename, struct stat *info)
+static int _archive_stat(struct stat *info, struct archive_entry *ent)
+{
+    if (!ent)
+        return -EACCES;
+
+    fprintf(stderr, "AR STAT ent @ %p\n", ent);
+    memcpy(info, archive_entry_stat(ent), sizeof(*info));
+    return 0;
+}
+
+static int archive_stat(const char *archive_filename, struct stat *info, struct virtual_file *file)
 {
     char *archive_name = find_archive_for_file(archive_filename);
     const char *filename = get_virtual_archive_file_name(archive_filename);
@@ -339,11 +425,7 @@ static int archive_stat(const char *archive_filename, struct stat *info)
     archive = _get_archive(archive_name);
     correct_ent = find_archive_entry(archive, filename);
 
-    if (correct_ent) {
-        memcpy(info, archive_entry_stat(correct_ent), sizeof(*info));
-        ret = 0;
-    } else
-        ret = -EACCES;
+    ret = _archive_stat(info, correct_ent);
 
     free(archive_name);
     archive_read_free(archive);
@@ -353,18 +435,22 @@ static int archive_stat(const char *archive_filename, struct stat *info)
 int do_getattr(const char *path, struct stat *info, struct fuse_file_info *fi)
 {
     int ret;
+    struct file *file;
 
     fprintf(stderr, "getattr %p, %s, %s\n", fi, path, get_path(path));
 
     if (fi) {
-        return fstat(((struct file *)fi->fh)->fd, info);
+        file = (struct file *)fi->fh;
+        if (!file->vfile)
+            return fstat(file->fd, info);
+        return _archive_stat(info, file->vfile->archive_entry);
     }
 
     ret = fstatat(root_fd(), get_path(path), info, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
     if (!ret)
         return ret;
 
-    return archive_stat(path, info);
+    return archive_stat(path, info, NULL);
 }
 
 static struct fuse_operations ops = {
