@@ -167,9 +167,13 @@ int do_open(const char *path, struct fuse_file_info *fi)
 {
     struct file *file;
 
+    fprintf(stderr, "open '%s'\n", path);
+
     file = open_file(path, fi->flags);
     if (!file)
         return -errno;
+
+    fprintf(stderr, "\tfd = %d\n", file->fd);
 
     fi->fh = (uintptr_t)file;
 
@@ -192,6 +196,8 @@ int do_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_
     struct file *file;
 
     file = (struct file *)fi->fh;
+    fprintf(stderr, "read %lu, from %d\n", size, file->fd);
+
     res = pread(file->fd, buf, size, offset);
     if (res == -1)
         return -errno;
@@ -205,6 +211,7 @@ int do_read_buf(const char *path, struct fuse_bufvec **bufp, size_t size, off_t 
     struct file *file;
 
     file = (struct file *)fi->fh;
+    fprintf(stderr, "read_buf %lu, from %d\n", size, file->fd);
 
     buf = malloc(sizeof(struct fuse_bufvec));
     if (!buf)
@@ -346,10 +353,12 @@ static int archive_stat(const char *archive_filename, struct stat *info)
 int do_getattr(const char *path, struct stat *info, struct fuse_file_info *fi)
 {
     int ret;
+
     fprintf(stderr, "getattr %p, %s, %s\n", fi, path, get_path(path));
 
-    if (fi)
-        return fstat(fi->fh, info);
+    if (fi) {
+        return fstat(((struct file *)fi->fh)->fd, info);
+    }
 
     ret = fstatat(root_fd(), get_path(path), info, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
     if (!ret)
