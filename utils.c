@@ -18,3 +18,13 @@ int endswith_list(const char *str, const char *ps[], size_t ps_len)
             return 1;
     return 0;
 }
+
+int startswith(const char *str, const char *p)
+{
+    int plen = strlen(p);
+
+    if (plen > strlen(str))
+        return 0;
+
+    return !strncmp(str, p, plen);
+}

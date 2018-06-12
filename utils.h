@@ -12,8 +12,11 @@
 #define dirent_array_next(dent_array, dent_size)                                                   \
     ((struct dirent *)(((uint8_t *)(dent_array)) + ((dent_size)*1)))
 
+#define min(a, b) ((a) < (b) ? (a) : (b))
+
 extern int endswith(const char *str, const char *p);
 extern int endswith_list(const char *str, const char *ps[], size_t ps_len);
+extern int startswith(const char *str, const char *p);
 
 static inline int struct_dirent_size(const char *path)
 {
