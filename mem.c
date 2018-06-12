@@ -50,29 +50,29 @@ static int free_space(struct fifo_buf *buf)
 }
 
 // len must be <= buf->size
-static void copy_to(struct fifo_buf *buf, uint8_t *data, size_t len)
+static void copy_to(struct fifo_buf *to, uint8_t *from, size_t len)
 {
-    int fs = free_space(buf);
-    uint8_t *buf_end = buf->mem + buf->size;
-    int positive_mem_left = (int)(buf_end - buf->tail);
+    int fs = free_space(to);
+    uint8_t *buf_end = to->mem + to->size;
+    int positive_mem_left = (int)(buf_end - to->tail);
 
     int tmp = min(positive_mem_left, len);
-    memcpy(buf->tail, data, tmp);
+    memcpy(to->tail, from, tmp);
 
     if (tmp != len) {
-        memcpy(buf->mem, data + tmp, len - tmp);
-        buf->tail = buf->mem + len - tmp;
+        memcpy(to->mem, from + tmp, len - tmp);
+        to->tail = to->mem + len - tmp;
     } else
-        buf->tail += len;
+        to->tail += len;
 
     if (len > fs) {
         int to_add = len - fs;
-        uint8_t *head_end = buf->head + to_add;
+        uint8_t *head_end = to->head + to_add;
 
         if (head_end > buf_end)
-            buf->head = buf->mem + (long)(head_end - buf_end);
+            to->head = to->mem + (long)(head_end - buf_end);
         else
-            buf->head = head_end;
+            to->head = head_end;
     }
 }
 
