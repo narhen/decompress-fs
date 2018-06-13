@@ -49,6 +49,16 @@ static int free_space(struct fifo_buf *buf)
     return (long)(buf->head - buf->tail);
 }
 
+static int used_space(struct fifo_buf *buf)
+{
+    return buf->size - free_space(buf);
+}
+
+static int data_left_from_pos(struct fifo_buf *buf, size_t pos)
+{
+    return used_space(buf) - (pos - buf->pos);
+}
+
 // len must be <= buf->size
 static void copy_to(struct fifo_buf *to, uint8_t *from, size_t len)
 {
@@ -87,27 +97,63 @@ int fifo_write(struct fifo_buf *buf, void *data, size_t len)
     return len;
 }
 
-// size bust be <= from->size
-static int copy_from(struct fifo_buf *from, uint8_t *to, size_t size)
+static uint8_t *pos_to_ptr(struct fifo_buf *from, size_t pos)
 {
-    int to_read = min(from->size - free_space(from), size);
-    uint8_t *from_end = from->mem + from->size;
-    int positive_mem_left = (int)(from_end - from->head);
+    int positive_mem_left;
+    size_t offset_from_head = pos - from->pos;
 
+    if (offset_from_head < 0)
+        return NULL;
+
+    positive_mem_left = from->size - (int)(from->head - from->mem);
+
+    if (offset_from_head < positive_mem_left)
+        return from->head + offset_from_head;
+
+    return from->mem + (offset_from_head - positive_mem_left);
+}
+
+static int copy_from_pos(
+    struct fifo_buf *from, uint8_t *to, size_t size, size_t pos, uint8_t **end_ptr_loc)
+{
+    uint8_t *ptr = pos_to_ptr(from, pos);
+    int to_read = min(data_left_from_pos(from, pos), size);
+
+    int positive_mem_left = from->size - (int)(ptr - from->mem);
     int tmp = min(positive_mem_left, to_read);
-    memcpy(to, from->head, tmp);
-    from->head += tmp;
+
+    memcpy(to, ptr, tmp);
+    ptr += tmp;
 
     if (tmp != to_read) {
         memcpy(to + tmp, from->mem, to_read - tmp);
-        from->head = from->mem + to_read - tmp;
+        ptr = from->mem + to_read - tmp;
     }
 
+    if (end_ptr_loc)
+        *end_ptr_loc = ptr;
+
     return to_read;
+}
+
+// size bust be <= from->size
+static int copy_from(struct fifo_buf *from, uint8_t *to, size_t size)
+{
+    return copy_from_pos(from, to, size, from->pos, &from->head);
 }
 
 int fifo_read(struct fifo_buf *src, void *dest, size_t size)
 {
     size = min(src->size, size);
     return copy_from(src, (uint8_t *)dest, size);
+}
+
+int fifo_peak(struct fifo_buf *src, void *dest, size_t size, size_t pos)
+{
+    size_t end_pos = src->pos + used_space(src);
+
+    if (pos < src->pos || pos >= end_pos)
+        return 0;
+
+    return copy_from_pos(src, dest, size, pos, NULL);
 }
