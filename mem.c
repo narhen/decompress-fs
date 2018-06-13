@@ -18,6 +18,12 @@ void fifo_free(struct fifo_buf *buf)
     free(buf);
 }
 
+void fifo_reset(struct fifo_buf *buf)
+{
+    buf->head = buf->tail = buf->mem;
+    buf->pos = 0;
+}
+
 struct fifo_buf *fifo_init(size_t size)
 {
     struct fifo_buf *buf;
@@ -27,14 +33,15 @@ struct fifo_buf *fifo_init(size_t size)
     if (!mem)
         return NULL;
 
-    buf = calloc(1, sizeof(struct fifo_buf));
+    buf = malloc(sizeof(struct fifo_buf));
     if (!buf) {
         free(mem);
         return NULL;
     }
 
     buf->size = size;
-    buf->mem = buf->head = buf->tail = mem;
+    fifo_reset(buf);
+
     return buf;
 }
 
@@ -59,19 +66,19 @@ static int data_left_from_pos(struct fifo_buf *buf, size_t pos)
     return used_space(buf) - (pos - buf->pos);
 }
 
-size_t curr_pos(struct fifo_buf *buf)
+size_t flfo_curr_pos(struct fifo_buf *buf)
 {
     return buf->pos;
 }
 
-size_t min_pos(struct fifo_buf *buf)
+size_t fifo_min_pos(struct fifo_buf *buf)
 {
     if (buf->tail > buf->head)
         return buf->pos - (size_t)(buf->head - buf->mem);
     return buf->pos - (size_t)(buf->head - buf->tail);
 }
 
-size_t max_pos(struct fifo_buf *buf)
+size_t fifo_max_pos(struct fifo_buf *buf)
 {
     return buf->pos + used_space(buf);
 }
@@ -119,10 +126,20 @@ static uint8_t *pos_to_ptr(struct fifo_buf *from, size_t pos)
     int head_offset = pos - from->pos;
     int head_mem_offset = (int)(from->head - from->mem);
 
-    if (pos < min_pos(from) || pos > max_pos(from))
+    if (pos < fifo_min_pos(from) || pos > fifo_max_pos(from))
         return NULL;
 
     return from->mem + ((head_offset + head_mem_offset) % from->size);
+}
+
+int fifo_set_pos(struct fifo_buf *buf, size_t pos)
+{
+    if (pos < fifo_min_pos(buf) || pos > fifo_max_pos(buf))
+        return 0;
+
+    buf->head = pos_to_ptr(buf, pos);
+    buf->pos = pos;
+    return 1;
 }
 
 static int copy_from_pos(
