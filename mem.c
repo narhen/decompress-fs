@@ -59,6 +59,23 @@ static int data_left_from_pos(struct fifo_buf *buf, size_t pos)
     return used_space(buf) - (pos - buf->pos);
 }
 
+size_t curr_pos(struct fifo_buf *buf)
+{
+    return buf->pos;
+}
+
+size_t min_pos(struct fifo_buf *buf)
+{
+    if (buf->tail > buf->head)
+        return buf->pos - (size_t)(buf->head - buf->mem);
+    return buf->pos - (size_t)(buf->head - buf->tail);
+}
+
+size_t max_pos(struct fifo_buf *buf)
+{
+    return buf->pos + used_space(buf);
+}
+
 // len must be <= buf->size
 static void copy_to(struct fifo_buf *to, uint8_t *from, size_t len)
 {
@@ -99,18 +116,13 @@ int fifo_write(struct fifo_buf *buf, void *data, size_t len)
 
 static uint8_t *pos_to_ptr(struct fifo_buf *from, size_t pos)
 {
-    int positive_mem_left;
-    size_t offset_from_head = pos - from->pos;
+    int head_offset = pos - from->pos;
+    int head_mem_offset = (int)(from->head - from->mem);
 
-    if (offset_from_head < 0)
+    if (pos < min_pos(from) || pos > max_pos(from))
         return NULL;
 
-    positive_mem_left = from->size - (int)(from->head - from->mem);
-
-    if (offset_from_head < positive_mem_left)
-        return from->head + offset_from_head;
-
-    return from->mem + (offset_from_head - positive_mem_left);
+    return from->mem + ((head_offset + head_mem_offset) % from->size);
 }
 
 static int copy_from_pos(
