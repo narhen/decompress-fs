@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,7 +63,7 @@ int fifo_available_data(struct fifo_buf *buf)
     return buf->size - free_space(buf);
 }
 
-static int data_left_from_pos(struct fifo_buf *buf, size_t pos)
+static int available_data_from_pos(struct fifo_buf *buf, size_t pos)
 {
     return fifo_available_data(buf) - (pos - buf->pos);
 }
@@ -74,9 +75,11 @@ size_t fifo_curr_pos(struct fifo_buf *buf)
 
 size_t fifo_min_pos(struct fifo_buf *buf)
 {
-    if (buf->tail > buf->head)
-        return buf->pos - (size_t)(buf->head - buf->mem);
-    return buf->pos - (size_t)(buf->head - buf->tail);
+    long diff = (long)(abs(buf->head - buf->tail));
+    if (buf->head == buf->tail)
+        diff = buf->size;
+
+    return min(0, buf->pos - diff);
 }
 
 size_t fifo_max_pos(struct fifo_buf *buf)
@@ -147,7 +150,7 @@ static int copy_from_pos(
     struct fifo_buf *from, uint8_t *to, size_t size, size_t pos, uint8_t **end_ptr_loc)
 {
     uint8_t *ptr = pos_to_ptr(from, pos);
-    int to_read = min(data_left_from_pos(from, pos), size);
+    int to_read = min(available_data_from_pos(from, pos), size);
 
     int positive_mem_left = from->size - (int)(ptr - from->mem);
     int tmp = min(positive_mem_left, to_read);
