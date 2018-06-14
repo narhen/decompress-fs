@@ -143,7 +143,7 @@ static struct archive *_get_rar_archive(const char *abspath, struct archive *a)
     }
 
     if (i == 1) {
-        if (archive_read_open_filename(a, multipart_archive_entries[0], 1024) != ARCHIVE_OK) {
+        if (archive_read_open_filename(a, multipart_archive_entries[0], 10240) != ARCHIVE_OK) {
             archive_read_free(a);
             return NULL;
         }
@@ -153,7 +153,7 @@ static struct archive *_get_rar_archive(const char *abspath, struct archive *a)
     qsort(multipart_archive_entries, i, sizeof(char *), cmpstringp);
 
     multipart_archive_entries[i] = NULL;
-    if (archive_read_open_filenames(a, (const char **)multipart_archive_entries, 4096)
+    if (archive_read_open_filenames(a, (const char **)multipart_archive_entries, 10240)
         != ARCHIVE_OK) {
         archive_read_free(a);
         return NULL;
@@ -176,7 +176,7 @@ static struct archive *_get_archive(const char *abspath)
     if (endswith(abspath, ".rar"))
         return _get_rar_archive(abspath, a);
 
-    if (archive_read_open_filename(a, abspath, 1024) != ARCHIVE_OK) {
+    if (archive_read_open_filename(a, abspath, 10240) != ARCHIVE_OK) {
         archive_read_free(a);
         return NULL;
     }
