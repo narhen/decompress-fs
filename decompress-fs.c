@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #define FUSE_USE_VERSION 31
 
+#include "mem.h"
 #include "utils.h"
 #include <archive.h>
 #include <archive_entry.h>
@@ -18,6 +19,7 @@
 #include <unistd.h>
 
 #define ROOT "/home/narhen/tmp"
+#define DEFAULT_MEM_BUF_SIZE (512 * 1024 * 1024) // 512 MiB
 
 const char *supported_formats[] = {
     "tar.bz2", "tar.gz", "tar", "rar",
@@ -27,9 +29,9 @@ struct virtual_file {
     struct archive *archive;
     struct archive_entry *archive_entry;
 
-    uint8_t *next_mem;
-    size_t next_mem_size;
-    off_t next_mem_off;
+    struct fifo_buf *buf;
+
+    char *archive_path, *archive_filename;
 };
 
 struct file {
@@ -52,6 +54,15 @@ static inline int supported_format(const char *filename)
 static inline struct data *get_data(void)
 {
     return (struct data *)fuse_get_context()->private_data;
+}
+
+static int _archive_stat(struct stat *info, struct archive_entry *ent)
+{
+    if (!ent)
+        return -EACCES;
+
+    memcpy(info, archive_entry_stat(ent), sizeof(*info));
+    return 0;
 }
 
 static inline int root_fd(void)
@@ -142,15 +153,12 @@ static struct archive *_get_rar_archive(const char *abspath, struct archive *a)
 
     if (archive_read_open_filenames(a, (const char **)multipart_archive_entries, 4096)
         != ARCHIVE_OK) {
-        fprintf(stderr, "FAIL!!!!\n");
         archive_read_free(a);
         return NULL;
     }
 
-    for (j = 0; j < i; j++) {
-        fprintf(stderr, "added '%s'\n", multipart_archive_entries[j]);
+    for (j = 0; j < i; j++)
         free(multipart_archive_entries[j]);
-    }
 
     return a;
 }
@@ -193,15 +201,25 @@ static struct archive_entry *find_archive_entry(struct archive *a, const char *f
     return NULL;
 }
 
+static inline void free_archive(struct archive *a)
+{
+    if (archive_read_free(a) != ARCHIVE_OK)
+        perror("archive_read_free");
+}
+
+static void free_virtual_file(struct virtual_file *vfile)
+{
+    free_archive(vfile->archive);
+    fifo_free(vfile->buf);
+    free(vfile->archive_path);
+    free(vfile->archive_filename);
+    free(vfile);
+}
+
 static void free_file(struct file *f)
 {
-    if (f->vfile) {
-        if (archive_read_free(f->vfile->archive) != ARCHIVE_OK)
-            perror("archive_read_free");
-        if (f->vfile->next_mem)
-            free(f->vfile->next_mem);
-        free(f->vfile);
-    }
+    if (f->vfile)
+        free_virtual_file(f->vfile);
 
     if (f->dp)
         closedir(f->dp);
@@ -211,12 +229,53 @@ static void free_file(struct file *f)
     free(f);
 }
 
+static int _open_archive(struct virtual_file *vfile)
+{
+    vfile->archive = _get_archive(vfile->archive_path);
+    if (!vfile->archive)
+        return 0;
+
+    vfile->archive_entry = find_archive_entry(vfile->archive, vfile->archive_filename);
+
+    return 1;
+}
+
+static struct virtual_file *open_archive(const char *path)
+{
+    struct virtual_file *vfile;
+
+    vfile = calloc(1, sizeof(struct virtual_file));
+    if (!vfile)
+        return NULL;
+
+    vfile->archive_path = find_archive_for_file(path);
+    if (!vfile->archive_path) {
+        free(vfile);
+        return NULL;
+    }
+
+    vfile->archive_filename = strdup(get_virtual_archive_file_name(path));
+    if (!vfile->archive_filename) {
+        free(vfile->archive_path);
+        free(vfile);
+        return NULL;
+    }
+
+    if (!_open_archive(vfile)) {
+        free(vfile->archive_path);
+        free(vfile->archive_filename);
+        free(vfile);
+        return NULL;
+    }
+
+    vfile->buf = fifo_init(DEFAULT_MEM_BUF_SIZE);
+    return vfile;
+}
+
 static struct file *open_file(const char *path, int flags)
 {
-    const char *filename, *p = get_path(path);
-    char *archive_name;
+    const char *p = get_path(path);
     struct file *file;
-    struct virtual_file *vfile;
 
     file = calloc(1, sizeof(struct file));
     if (!file)
@@ -226,30 +285,11 @@ static struct file *open_file(const char *path, int flags)
     if (file->fd >= 0)
         return file;
 
-    archive_name = find_archive_for_file(path);
-    if (!archive_name) {
+    file->vfile = open_archive(p);
+    if (!file->vfile) {
         free_file(file);
         return NULL;
     }
-
-    vfile = calloc(1, sizeof(struct virtual_file));
-    if (!vfile) {
-        free_file(file);
-        return NULL;
-    }
-
-    vfile->archive = _get_archive(archive_name);
-    free(archive_name);
-
-    if (!vfile->archive) {
-        free(file);
-        return NULL;
-    }
-
-    filename = get_virtual_archive_file_name(p);
-    vfile->archive_entry = find_archive_entry(vfile->archive, filename);
-
-    file->vfile = vfile;
 
     return file;
 }
@@ -263,8 +303,6 @@ int do_open(const char *path, struct fuse_file_info *fi)
     file = open_file(path, fi->flags);
     if (!file)
         return -errno;
-
-    fprintf(stderr, "\tfd = %d, vfile = %p\n", file->fd, file->vfile);
 
     fi->fh = (uintptr_t)file;
 
@@ -295,51 +333,64 @@ int do_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_
     return res;
 }
 
-static int fill_buffer_from_memory(
-    struct fuse_buf *target, size_t max_size, struct virtual_file *file)
+static int vfile_read(struct virtual_file *vfile, size_t min_bytes)
 {
-    int unread_memory = file->next_mem_size - file->next_mem_off;
+    int bytes_read, res;
+    void *mem;
+    off_t offset;
+    size_t block_size;
 
-    fprintf(stderr, "%s: %lu, unread memory: %d\n", __func__, max_size, unread_memory);
+    bytes_read = 0;
+    while (bytes_read < min_bytes) {
+        res = archive_read_data_block(vfile->archive, (const void **)&mem, &block_size, &offset);
+        if (res == ARCHIVE_EOF)
+            break;
+        else if (res == ARCHIVE_FATAL) {
+            perror("archive_read_data_block");
+            return -errno;
+        }
 
-    if (unread_memory > max_size) {
-        target->mem = malloc(max_size);
-        if (!target->mem)
+        if (!block_size || !mem)
+            continue;
+
+        res = fifo_write(vfile->buf, mem, block_size);
+        if (res != block_size)
             return -ENOMEM;
-        target->size = max_size;
-        memcpy(target->mem, file->next_mem + file->next_mem_off, max_size);
-        file->next_mem_off += max_size;
 
-        return max_size;
+        bytes_read += res;
     }
 
-    if (file->next_mem_off == 0) {
-        target->mem = file->next_mem;
-        target->size = file->next_mem_size;
-    } else {
-        target->mem = malloc(unread_memory);
-        if (!target->mem)
-            return -ENOMEM;
-        target->size = unread_memory;
-        memcpy(target->mem, file->next_mem + file->next_mem_off, unread_memory);
-        free(file->next_mem);
+    return bytes_read;
+}
+
+static int vfile_seek(struct virtual_file *vfile, off_t offset)
+{
+    struct stat info;
+
+    if (_archive_stat(&info, vfile->archive_entry) != 0)
+        return -EINVAL;
+
+    if (offset < 0 || offset > info.st_size)
+        return -EINVAL;
+
+    if (offset > fifo_max_pos(vfile->buf))
+        vfile_read(vfile, offset - fifo_max_pos(vfile->buf));
+    else if (offset < fifo_min_pos(vfile->buf)) {
+        free_archive(vfile->archive);
+        _open_archive(vfile);
+        fifo_reset(vfile->buf);
+        vfile_read(vfile, offset);
     }
 
-    file->next_mem = NULL;
-    file->next_mem_off = file->next_mem_size = 0;
-    return unread_memory;
+    return fifo_set_pos(vfile->buf, offset);
 }
 
 static int read_vfile_buf(
     struct fuse_bufvec **bufp, size_t size, off_t offset, struct virtual_file *file)
 {
+    int available_data;
     struct fuse_bufvec *bufs;
-    struct fuse_buf *ptr;
-    int ret = 0, res, num_bufs = 1;
-    int bytes_read = 0, curr_buf = 0;
-    off_t off;
-    size_t block_size;
-    void *mem;
+    struct fuse_buf *buf;
 
     fprintf(stderr, "read_vfile_buf: size: %lu, offset: %lu, file: %p\n", size, offset, file);
 
@@ -347,70 +398,26 @@ static int read_vfile_buf(
     if (!bufs)
         return -1;
 
-    if (file->next_mem) {
-        if ((bytes_read = fill_buffer_from_memory(bufs->buf, size, file)) < 0)
-            return bytes_read;
-        fprintf(stderr, "read %d bytes from memory. size = %lu\n", bytes_read, size);
-        curr_buf = 1;
+    if (fifo_curr_pos(file->buf) != offset) {
+        if (!vfile_seek(file, offset))
+            return -1;
     }
 
-    while (bytes_read < size) {
-        res = archive_read_data_block(file->archive, (const void **)&mem, &block_size, &off);
-        if (res == ARCHIVE_EOF) {
-            ret = 0;
-            break;
-        } else if (res == ARCHIVE_WARN)
-            perror("archive_read_data_block");
-        else if (res == ARCHIVE_FATAL)
-            return -errno;
+    available_data = fifo_available_data(file->buf);
+    if (size > available_data)
+        vfile_read(file, size - available_data);
 
-        if (!block_size || !mem)
-            continue;
+    buf = bufs->buf;
+    buf->mem = malloc(size);
+    if (!buf->mem)
+        return -ENOMEM;
 
-        if (curr_buf >= num_bufs) {
-            num_bufs *= 2;
-            bufs = realloc(
-                bufs, sizeof(struct fuse_bufvec) + ((num_bufs - 1) * sizeof(struct fuse_buf)));
-            if (!bufs)
-                return -ENOMEM;
-        }
+    buf->size = fifo_read(file->buf, buf->mem, size);
 
-        fprintf(stderr, "read %lu byte block\n", block_size);
-        ptr = &bufs->buf[curr_buf++];
-
-        if (bytes_read + block_size <= size) {
-            ptr->size = block_size;
-            ptr->mem = malloc(ptr->size);
-            if (!ptr->mem)
-                return -ENOMEM;
-            memcpy(ptr->mem, mem, ptr->size);
-        } else {
-            ptr->size = size - bytes_read;
-            ptr->mem = malloc(ptr->size);
-            if (!ptr->mem)
-                return -ENOMEM;
-            memcpy(ptr->mem, mem, ptr->size);
-
-            file->next_mem_size = block_size - ptr->size;
-            file->next_mem = malloc(file->next_mem_size);
-            if (!file->next_mem)
-                return -ENOMEM;
-            memcpy(file->next_mem, ((uint8_t *)mem) + ptr->size, file->next_mem_size);
-            file->next_mem_off = 0;
-
-            fprintf(stderr, "this boi is full. storing next chunk for next read. next_mem: %p, "
-                            "next_mem_size: %lu\n",
-                file->next_mem, file->next_mem_size);
-        }
-
-        bytes_read += ptr->size;
-        fprintf(stderr, "read %d/%lu bytes\n", bytes_read, size);
-    }
-
-    bufs->count = num_bufs;
+    bufs->count = 1;
     *bufp = bufs;
 
-    return ret;
+    return 0;
 }
 
 int do_read_buf(const char *path, struct fuse_bufvec **bufp, size_t size, off_t offset,
@@ -441,11 +448,11 @@ int do_read_buf(const char *path, struct fuse_bufvec **bufp, size_t size, off_t 
 // TODO: opendir where dir is virtual (not actually on the file system)
 int do_opendir(const char *path, struct fuse_file_info *fi)
 {
-    struct file *file;
-
-    file = open_file(path, fi->flags);
+    struct file *file = NULL;
 
     fprintf(stderr, "   opendir %d, %p, %s, %p\n", getpid(), fi, path, file);
+
+    file = open_file(path, fi->flags);
 
     if (!file)
         return -errno;
@@ -536,15 +543,6 @@ int do_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 done:
     free(dirents);
     return ret;
-}
-
-static int _archive_stat(struct stat *info, struct archive_entry *ent)
-{
-    if (!ent)
-        return -EACCES;
-
-    memcpy(info, archive_entry_stat(ent), sizeof(*info));
-    return 0;
 }
 
 static int archive_stat(const char *archive_filename, struct stat *info)

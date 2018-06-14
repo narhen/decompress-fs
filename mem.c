@@ -39,6 +39,7 @@ struct fifo_buf *fifo_init(size_t size)
         return NULL;
     }
 
+    buf->mem = mem;
     buf->size = size;
     fifo_reset(buf);
 
@@ -56,17 +57,17 @@ static int free_space(struct fifo_buf *buf)
     return (long)(buf->head - buf->tail);
 }
 
-static int used_space(struct fifo_buf *buf)
+int fifo_available_data(struct fifo_buf *buf)
 {
     return buf->size - free_space(buf);
 }
 
 static int data_left_from_pos(struct fifo_buf *buf, size_t pos)
 {
-    return used_space(buf) - (pos - buf->pos);
+    return fifo_available_data(buf) - (pos - buf->pos);
 }
 
-size_t flfo_curr_pos(struct fifo_buf *buf)
+size_t fifo_curr_pos(struct fifo_buf *buf)
 {
     return buf->pos;
 }
@@ -80,7 +81,7 @@ size_t fifo_min_pos(struct fifo_buf *buf)
 
 size_t fifo_max_pos(struct fifo_buf *buf)
 {
-    return buf->pos + used_space(buf);
+    return buf->pos + fifo_available_data(buf);
 }
 
 // len must be <= buf->size
@@ -117,7 +118,6 @@ int fifo_write(struct fifo_buf *buf, void *data, size_t len)
 
     copy_to(buf, data_ptr + seek, min(len, buf->size));
 
-    buf->pos += len;
     return len;
 }
 
@@ -139,6 +139,7 @@ int fifo_set_pos(struct fifo_buf *buf, size_t pos)
 
     buf->head = pos_to_ptr(buf, pos);
     buf->pos = pos;
+
     return 1;
 }
 
@@ -173,13 +174,18 @@ static int copy_from(struct fifo_buf *from, uint8_t *to, size_t size)
 
 int fifo_read(struct fifo_buf *src, void *dest, size_t size)
 {
+    int bytes_read;
+
     size = min(src->size, size);
-    return copy_from(src, (uint8_t *)dest, size);
+    bytes_read = copy_from(src, (uint8_t *)dest, size);
+    src->pos += bytes_read;
+
+    return bytes_read;
 }
 
 int fifo_peak(struct fifo_buf *src, void *dest, size_t size, size_t pos)
 {
-    size_t end_pos = src->pos + used_space(src);
+    size_t end_pos = src->pos + fifo_available_data(src);
 
     if (pos < src->pos || pos >= end_pos)
         return 0;
