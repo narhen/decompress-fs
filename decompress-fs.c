@@ -321,20 +321,6 @@ int do_release(const char *path, struct fuse_file_info *fi)
     return 0;
 }
 
-int do_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
-{
-    int res;
-    struct file *file;
-
-    file = (struct file *)fi->fh;
-    fprintf(stderr, "read %lu, from %d\n", size, file->fd);
-
-    res = pread(file->fd, buf, size, offset);
-    if (res == -1)
-        return -errno;
-    return res;
-}
-
 static int vfile_read(struct virtual_file *vfile, size_t min_bytes)
 {
     int bytes_read, res;
@@ -344,9 +330,7 @@ static int vfile_read(struct virtual_file *vfile, size_t min_bytes)
 
     bytes_read = 0;
     while (bytes_read < min_bytes) {
-        fprintf(stderr, "before unrar\n");
         res = archive_read_data_block(vfile->archive, (const void **)&mem, &block_size, &offset);
-        fprintf(stderr, "after unrar");
         if (res == ARCHIVE_EOF) {
             fprintf(stderr, "EOF\n");
             break;
@@ -355,17 +339,12 @@ static int vfile_read(struct virtual_file *vfile, size_t min_bytes)
             return -errno;
         }
 
-        if (!block_size || !mem) {
-            fprintf(stderr, "FUUUUUUUU blsize %lu, mem %p\n", block_size, mem);
+        if (!block_size || !mem)
             continue;
-        }
 
         res = fifo_write(vfile->buf, mem, block_size);
-        if (res != block_size) {
-            fprintf(stderr, "fifo write fail\n");
+        if (res != block_size)
             return -ENOMEM;
-        }
-        fprintf(stderr, "extracted and stored %d bytes in memory\n", res);
 
         bytes_read += res;
     }
@@ -416,18 +395,13 @@ static int read_vfile_buf(
     }
 
     available_data = fifo_available_data(file->buf);
-    fprintf(stderr, "available data %d, requesting %lu\n", available_data, size);
-    if (size > available_data) {
+    if (size > available_data)
         vfile_read(file, size - available_data);
-    }
-    fprintf(stderr, "asshole is finished\n");
 
     buf = bufs->buf;
     buf->mem = malloc(size);
-    if (!buf->mem) {
-        perror("[-] malloc");
+    if (!buf->mem)
         return -ENOMEM;
-    }
 
     buf->size = fifo_read(file->buf, buf->mem, size);
     fprintf(stderr, "[+] read %lu bytes to buffer @ %p\n", buf->size, file->buf);
@@ -436,6 +410,41 @@ static int read_vfile_buf(
     *bufp = bufs;
 
     return 0;
+}
+
+static int read_vfile(struct virtual_file *vfile, void *buf, size_t size, off_t offset)
+{
+    int available_data;
+    fprintf(stderr, "%s reading at most %lu bytes into %p from offset %lu\n", __func__, size, buf,
+        offset);
+
+    if (fifo_curr_pos(vfile->buf) != offset) {
+        if (!vfile_seek(vfile, offset))
+            return -1;
+    }
+
+    available_data = fifo_available_data(vfile->buf);
+    if (size > available_data)
+        vfile_read(vfile, size - available_data);
+
+    return fifo_read(vfile->buf, buf, size);
+}
+
+int do_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
+{
+    int res;
+    struct file *file;
+
+    file = (struct file *)fi->fh;
+    if (file->vfile)
+        return read_vfile(file->vfile, buf, size, offset);
+
+    fprintf(stderr, "read %lu, from %d\n", size, file->fd);
+
+    res = pread(file->fd, buf, size, offset);
+    if (res == -1)
+        return -errno;
+    return res;
 }
 
 int do_read_buf(const char *path, struct fuse_bufvec **bufp, size_t size, off_t offset,
@@ -570,8 +579,6 @@ static int archive_stat(const char *archive_filename, struct stat *info)
     struct archive *archive;
     struct archive_entry *correct_ent = NULL;
     int ret = 0;
-
-    fprintf(stderr, "archvie_stat %s\n", archive_filename);
 
     if (!archive_name)
         return -EACCES;
