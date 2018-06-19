@@ -3,6 +3,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef UNIT_TEST
+#include <setjmp.h>
+#include <stdarg.h>
+#include <stddef.h>
+#include <cmocka.h>
+#define malloc(size) test_malloc((size))
+#define realloc(ptr, size) test_realloc((ptr), (size))
+#define calloc(nmemb, size) test_calloc((nmemb), (size))
+#define free(ptr) test_free((ptr))
+#endif
+
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
 struct fifo_buf {
