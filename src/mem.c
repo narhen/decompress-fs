@@ -86,7 +86,7 @@ size_t fifo_curr_pos(struct fifo_buf *buf)
 
 size_t fifo_min_pos(struct fifo_buf *buf)
 {
-    long diff = (long)(abs(buf->head - buf->tail));
+    long diff = labs(buf->head - buf->tail);
     if (buf->head == buf->tail)
         diff = buf->size;
 
@@ -197,7 +197,7 @@ int fifo_read(struct fifo_buf *src, void *dest, size_t size)
     return bytes_read;
 }
 
-int fifo_peak(struct fifo_buf *src, void *dest, size_t size, size_t pos)
+int fifo_peek_pos(struct fifo_buf *src, void *dest, size_t size, size_t pos)
 {
     size_t end_pos = src->pos + fifo_available_data(src);
 
@@ -205,4 +205,9 @@ int fifo_peak(struct fifo_buf *src, void *dest, size_t size, size_t pos)
         return 0;
 
     return copy_from_pos(src, dest, size, pos, NULL);
+}
+
+int fifo_peek(struct fifo_buf *src, void *dest, size_t size)
+{
+    return fifo_peek_pos(src, dest, size, fifo_curr_pos(src));
 }
