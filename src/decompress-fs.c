@@ -335,7 +335,7 @@ static int vfile_read(struct virtual_file *vfile, size_t min_bytes)
             fprintf(stderr, "EOF\n");
             break;
         } else if (res == ARCHIVE_FATAL) {
-            perror("archive_read_data_block");
+            fprintf(stderr, "archive_read_data_block: %s\n", archive_error_string(vfile->archive));
             return -errno;
         }
 
