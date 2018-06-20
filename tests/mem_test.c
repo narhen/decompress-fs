@@ -116,7 +116,7 @@ int main(void)
         cmocka_unit_test_setup_teardown(
             fifo_write__should_wrap_around_when_hitting_end_of_mem_area, setup, teardown),
         cmocka_unit_test_setup_teardown(
-                fifo_write__positions_should_be_updated_correctly, setup, teardown),
+            fifo_write__positions_should_be_updated_correctly, setup, teardown),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
