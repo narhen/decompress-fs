@@ -15,12 +15,14 @@
 #endif
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#define MOD(a, b) ((((a) % (b)) + (b)) % (b))
 
 struct fifo_buf {
     uint8_t *mem;
     uint8_t *head, *tail;
 
-    size_t pos;
+    size_t head_pos, tail_pos;
     size_t size;
 };
 
@@ -33,7 +35,7 @@ void fifo_free(struct fifo_buf *buf)
 void fifo_reset(struct fifo_buf *buf)
 {
     buf->head = buf->tail = buf->mem;
-    buf->pos = 0;
+    buf->head_pos = buf->tail_pos = 0;
 }
 
 struct fifo_buf *fifo_init(size_t size)
@@ -58,86 +60,89 @@ struct fifo_buf *fifo_init(size_t size)
     return buf;
 }
 
-static int free_space(struct fifo_buf *buf)
+static inline uint64_t ptr_distance(struct fifo_buf *buf, uint8_t *from, uint8_t *to)
 {
-    if (buf->head == buf->tail)
-        return buf->size;
+    int64_t dist;
 
-    if (buf->tail > buf->head)
-        return buf->size - (int)(buf->tail - buf->head);
-
-    return (long)(buf->head - buf->tail);
+    dist = (int64_t)(to - from);
+    return MOD(dist, buf->size);
 }
 
 int fifo_available_data(struct fifo_buf *buf)
 {
-    return buf->size - free_space(buf);
+    return buf->tail_pos - buf->head_pos;
 }
 
 static int available_data_from_pos(struct fifo_buf *buf, size_t pos)
 {
-    return fifo_available_data(buf) - (pos - buf->pos);
+    return fifo_available_data(buf) - (pos - buf->head_pos);
 }
 
 size_t fifo_curr_pos(struct fifo_buf *buf)
 {
-    return buf->pos;
+    return buf->head_pos;
 }
 
-size_t fifo_min_pos(struct fifo_buf *buf)
+long fifo_min_pos(struct fifo_buf *buf)
 {
-    long diff = labs(buf->head - buf->tail);
-    if (buf->head == buf->tail)
-        diff = buf->size;
-
-    return min(0, buf->pos - diff);
+    long min_pos = buf->head_pos - ptr_distance(buf, buf->tail, buf->head);
+    return max(0, min_pos);
 }
 
 size_t fifo_max_pos(struct fifo_buf *buf)
 {
-    return buf->pos + fifo_available_data(buf);
+    return buf->tail_pos;
+}
+
+static uint8_t *ptr_add_offset(struct fifo_buf *buf, uint8_t *ptr, int offset)
+{
+    int64_t new_off, ptr_off;
+
+    if (ptr < buf->mem || ptr > buf->mem + buf->size)
+        return NULL;
+
+    ptr_off = (int64_t)(ptr - buf->mem);
+    new_off = MOD(ptr_off + offset, buf->size);
+
+    return buf->mem + new_off;
 }
 
 // len must be <= buf->size
-static void copy_to(struct fifo_buf *to, uint8_t *from, size_t len)
+static void copy_to(struct fifo_buf *to, uint8_t *dest, uint8_t *src, size_t len)
 {
-    int fs = free_space(to);
     uint8_t *buf_end = to->mem + to->size;
-    int positive_mem_left = (int)(buf_end - to->tail);
-
+    int positive_mem_left = (int)(buf_end - dest);
     int tmp = min(positive_mem_left, len);
-    memcpy(to->tail, from, tmp);
 
-    if (tmp != len) {
-        memcpy(to->mem, from + tmp, len - tmp);
-        to->tail = to->mem + len - tmp;
-    } else
-        to->tail += len;
-
-    if (len > fs) {
-        int to_add = len - fs;
-        uint8_t *head_end = to->head + to_add;
-
-        if (head_end > buf_end)
-            to->head = to->mem + (long)(head_end - buf_end);
-        else
-            to->head = head_end;
-    }
+    memcpy(dest, src, tmp);
+    if (tmp != len)
+        memcpy(to->mem, src + tmp, len - tmp);
 }
 
 int fifo_write(struct fifo_buf *buf, void *data, size_t len)
 {
     uint8_t *data_ptr = data;
     size_t seek = len > buf->size ? len - buf->size : 0;
+    size_t to_copy = min(len, buf->size);
+    long dist_from_head_to_tail;
 
-    copy_to(buf, data_ptr + seek, min(len, buf->size));
+    copy_to(buf, buf->tail, data_ptr + seek, to_copy);
+
+    buf->tail = ptr_add_offset(buf, buf->tail, to_copy);
+    buf->tail_pos += len;
+
+    if (fifo_available_data(buf) > buf->size) {
+        dist_from_head_to_tail = ptr_distance(buf, buf->head, buf->tail);
+        buf->head = ptr_add_offset(buf, buf->head, dist_from_head_to_tail);
+        buf->head_pos += dist_from_head_to_tail + (((len - 1) / buf->size) * buf->size);
+    }
 
     return len;
 }
 
 static uint8_t *pos_to_ptr(struct fifo_buf *from, size_t pos)
 {
-    int head_offset = pos - from->pos;
+    int head_offset = pos - from->head_pos;
     int head_mem_offset = (int)(from->head - from->mem);
 
     if (pos < fifo_min_pos(from) || pos > fifo_max_pos(from))
@@ -152,7 +157,7 @@ int fifo_set_pos(struct fifo_buf *buf, size_t pos)
         return 0;
 
     buf->head = pos_to_ptr(buf, pos);
-    buf->pos = pos;
+    buf->head_pos = pos;
 
     return 1;
 }
@@ -183,7 +188,7 @@ static int copy_from_pos(
 // size bust be <= from->size
 static int copy_from(struct fifo_buf *from, uint8_t *to, size_t size)
 {
-    return copy_from_pos(from, to, size, from->pos, &from->head);
+    return copy_from_pos(from, to, size, from->head_pos, &from->head);
 }
 
 int fifo_read(struct fifo_buf *src, void *dest, size_t size)
@@ -192,16 +197,16 @@ int fifo_read(struct fifo_buf *src, void *dest, size_t size)
 
     size = min(src->size, size);
     bytes_read = copy_from(src, (uint8_t *)dest, size);
-    src->pos += bytes_read;
+    src->head_pos += bytes_read;
 
     return bytes_read;
 }
 
 int fifo_peek_pos(struct fifo_buf *src, void *dest, size_t size, size_t pos)
 {
-    size_t end_pos = src->pos + fifo_available_data(src);
+    size_t end_pos = src->head_pos + fifo_available_data(src);
 
-    if (pos < src->pos || pos >= end_pos)
+    if (pos < src->head_pos || pos >= end_pos)
         return 0;
 
     return copy_from_pos(src, dest, size, pos, NULL);
