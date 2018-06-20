@@ -66,11 +66,44 @@ static void fifo_write__should_wrap_around_when_hitting_end_of_mem_area(void **s
     assert_int_equal(fifo_write(buf, tmp, sizeof(tmp)), sizeof(tmp));
     assert_int_equal(fifo_available_data(buf), FIFO_SIZE);
     assert_int_equal(fifo_curr_pos(buf), FIFO_SIZE);
-    assert_int_equal(fifo_min_pos(buf), FIFO_SIZE);
     assert_int_equal(fifo_max_pos(buf), sizeof(tmp));
+    assert_int_equal(fifo_min_pos(buf), FIFO_SIZE);
 
     assert_int_equal(fifo_read(buf, tmp2, sizeof(tmp2)), FIFO_SIZE);
     assert_memory_equal(tmp + FIFO_SIZE, tmp2, FIFO_SIZE);
+
+    assert_int_equal(fifo_available_data(buf), 0);
+    assert_int_equal(fifo_curr_pos(buf), sizeof(tmp));
+    assert_int_equal(fifo_min_pos(buf), FIFO_SIZE);
+    assert_int_equal(fifo_max_pos(buf), sizeof(tmp));
+}
+
+static void fifo_write__positions_should_be_updated_correctly(void **state)
+{
+    struct fifo_buf *buf = *state;
+    char tmp[FIFO_SIZE * 3], tmp2[FIFO_SIZE];
+
+    memset(tmp, 'A', FIFO_SIZE);
+    memset(tmp + FIFO_SIZE, 'B', FIFO_SIZE);
+    memset(tmp + FIFO_SIZE * 2, 'C', FIFO_SIZE);
+
+    assert_int_equal(fifo_write(buf, tmp, 4), 4);
+    assert_int_equal(fifo_read(buf, tmp2, sizeof(tmp2)), 4);
+    assert_memory_equal(tmp2, tmp, 4);
+
+    assert_int_equal(fifo_write(buf, tmp, sizeof(tmp)), sizeof(tmp));
+    assert_int_equal(fifo_available_data(buf), FIFO_SIZE);
+    assert_int_equal(fifo_curr_pos(buf), FIFO_SIZE * 2 + 4);
+    assert_int_equal(fifo_min_pos(buf), FIFO_SIZE * 2 + 4);
+    assert_int_equal(fifo_max_pos(buf), sizeof(tmp) + 4);
+
+    assert_int_equal(fifo_peek(buf, tmp2, sizeof(tmp2)), FIFO_SIZE);
+    assert_memory_equal(tmp2, tmp + FIFO_SIZE * 2, FIFO_SIZE);
+
+    assert_int_equal(fifo_available_data(buf), FIFO_SIZE);
+    assert_int_equal(fifo_curr_pos(buf), FIFO_SIZE * 2 + 4);
+    assert_int_equal(fifo_min_pos(buf), FIFO_SIZE * 2 + 4);
+    assert_int_equal(fifo_max_pos(buf), sizeof(tmp) + 4);
 }
 
 int main(void)
@@ -82,6 +115,8 @@ int main(void)
             fifo_available_data__should_return_num_avaiable_bytes, setup, teardown),
         cmocka_unit_test_setup_teardown(
             fifo_write__should_wrap_around_when_hitting_end_of_mem_area, setup, teardown),
+        cmocka_unit_test_setup_teardown(
+                fifo_write__positions_should_be_updated_correctly, setup, teardown),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

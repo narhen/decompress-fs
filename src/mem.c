@@ -68,6 +68,14 @@ static inline uint64_t ptr_distance(struct fifo_buf *buf, uint8_t *from, uint8_t
     return MOD(dist, buf->size);
 }
 
+static inline long pos_distance(struct fifo_buf *buf, size_t from, size_t to)
+{
+    long dist;
+
+    dist = to - from;
+    return MOD(dist, buf->size);
+}
+
 int fifo_available_data(struct fifo_buf *buf)
 {
     return buf->tail_pos - buf->head_pos;
@@ -85,7 +93,14 @@ size_t fifo_curr_pos(struct fifo_buf *buf)
 
 long fifo_min_pos(struct fifo_buf *buf)
 {
-    long min_pos = buf->head_pos - ptr_distance(buf, buf->tail, buf->head);
+    long min_pos;
+    uint64_t tail_to_head_dist;
+
+    tail_to_head_dist = ptr_distance(buf, buf->tail, buf->head);
+    if (!tail_to_head_dist && buf->tail_pos == buf->head_pos)
+        tail_to_head_dist = buf->size;
+
+    min_pos = buf->head_pos - tail_to_head_dist;
     return max(0, min_pos);
 }
 
