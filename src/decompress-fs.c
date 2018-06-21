@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define ROOT "/home/narhen/tmp"
 #define DEFAULT_MEM_BUF_SIZE (512 * 1024 * 1024) // 512 MiB
@@ -29,8 +30,9 @@ struct virtual_file {
     struct archive *archive;
     struct archive_entry *archive_entry;
 
-    struct fifo_buf *buf;
+    pthread_mutex_t lock;
 
+    struct fifo_buf *buf;
     char *archive_path, *archive_filename;
 };
 
@@ -215,6 +217,7 @@ static void free_virtual_file(struct virtual_file *vfile)
     fifo_free(vfile->buf);
     free(vfile->archive_path);
     free(vfile->archive_filename);
+    pthread_mutex_destroy(&vfile->lock);
     free(vfile);
 }
 
@@ -271,6 +274,8 @@ static struct virtual_file *open_archive(const char *path)
     }
 
     vfile->buf = fifo_init(DEFAULT_MEM_BUF_SIZE);
+    pthread_mutex_init(&vfile->lock, NULL);
+
     return vfile;
 }
 
@@ -379,20 +384,23 @@ static int vfile_seek(struct virtual_file *vfile, off_t offset)
 static int read_vfile_buf(
     struct fuse_bufvec **bufp, size_t size, off_t offset, struct virtual_file *file)
 {
-    int available_data;
+    int available_data, ret = 0;
     struct fuse_bufvec *bufs;
     struct fuse_buf *buf;
+
+    pthread_mutex_lock(&file->lock);
 
     fprintf(stderr, "[+] read_vfile_buf: size: %lu, offset: %lu, file: %p\n", size, offset, file);
 
     bufs = calloc(1, sizeof(struct fuse_bufvec));
-    if (!bufs)
-        return -1;
-
-    if (fifo_curr_pos(file->buf) != offset) {
-        if (!vfile_seek(file, offset))
-            return -1;
+    if (!bufs) {
+        ret = -ENOMEM;
+        goto done;
     }
+
+    if (fifo_curr_pos(file->buf) != offset)
+        if ((ret = vfile_seek(file, offset)) < 0)
+            goto done;
 
     available_data = fifo_available_data(file->buf);
     if (size > available_data)
@@ -400,8 +408,10 @@ static int read_vfile_buf(
 
     buf = bufs->buf;
     buf->mem = malloc(size);
-    if (!buf->mem)
-        return -ENOMEM;
+    if (!buf->mem) {
+        ret = -ENOMEM;
+        goto done;
+    }
 
     buf->size = fifo_read(file->buf, buf->mem, size);
     fprintf(stderr, "[+] read %lu bytes to buffer @ %p\n", buf->size, file->buf);
@@ -409,7 +419,10 @@ static int read_vfile_buf(
     bufs->count = 1;
     *bufp = bufs;
 
-    return 0;
+done:
+    pthread_mutex_unlock(&file->lock);
+
+    return ret;
 }
 
 static int read_vfile(struct virtual_file *vfile, void *buf, size_t size, off_t offset)
@@ -440,7 +453,6 @@ int do_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_
         return read_vfile(file->vfile, buf, size, offset);
 
     fprintf(stderr, "read %lu, from %d\n", size, file->fd);
-
     res = pread(file->fd, buf, size, offset);
     if (res == -1)
         return -errno;
@@ -618,7 +630,7 @@ static struct fuse_operations ops = {
     .releasedir = do_releasedir,
     .open = do_open,
     .release = do_release,
-    .read = do_read,
+    //.read = do_read,
     .read_buf = do_read_buf,
     .getattr = do_getattr,
 };

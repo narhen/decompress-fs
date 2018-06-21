@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -23,6 +24,8 @@ struct fifo_buf {
     uint8_t *head, *tail;
     int bytes_read_from_current_head;
 
+    pthread_mutex_t lock;
+
     size_t head_pos, tail_pos;
     size_t size;
 };
@@ -30,6 +33,7 @@ struct fifo_buf {
 void fifo_free(struct fifo_buf *buf)
 {
     free(buf->mem);
+    pthread_mutex_destroy(&buf->lock);
     free(buf);
 }
 
@@ -58,6 +62,8 @@ struct fifo_buf *fifo_init(size_t size)
     buf->mem = mem;
     buf->size = size;
     fifo_reset(buf);
+
+    pthread_mutex_init(&buf->lock, NULL);
 
     return buf;
 }
@@ -93,7 +99,7 @@ size_t fifo_curr_pos(struct fifo_buf *buf)
     return buf->head_pos;
 }
 
-long fifo_min_pos(struct fifo_buf *buf)
+static long min_pos_unlocked(struct fifo_buf *buf)
 {
     long min_pos, head_pos;
     uint64_t tail_to_head_dist;
@@ -106,6 +112,17 @@ long fifo_min_pos(struct fifo_buf *buf)
     min_pos = head_pos - tail_to_head_dist;
     int max_rewind = min(buf->bytes_read_from_current_head, buf->size);
     long ret = max(head_pos - max_rewind, min_pos);
+
+    return ret;
+}
+
+long fifo_min_pos(struct fifo_buf *buf)
+{
+    long ret;
+
+    pthread_mutex_lock(&buf->lock);
+    ret = min_pos_unlocked(buf);
+    pthread_mutex_unlock(&buf->lock);
 
     return ret;
 }
@@ -142,6 +159,8 @@ static void copy_to(struct fifo_buf *to, uint8_t *dest, uint8_t *src, size_t len
 
 int fifo_write(struct fifo_buf *buf, void *data, size_t len)
 {
+    pthread_mutex_lock(&buf->lock);
+
     uint8_t *data_ptr = data;
     size_t seek = len > buf->size ? len - buf->size : 0;
     size_t to_copy = min(len, buf->size);
@@ -158,6 +177,7 @@ int fifo_write(struct fifo_buf *buf, void *data, size_t len)
         buf->head_pos += dist_from_head_to_tail + (((len - 1) / buf->size) * buf->size);
     }
 
+    pthread_mutex_unlock(&buf->lock);
     return len;
 }
 
@@ -166,7 +186,7 @@ static uint8_t *pos_to_ptr(struct fifo_buf *from, size_t pos)
     int head_offset = pos - from->head_pos;
     int head_mem_offset = (int)(from->head - from->mem);
 
-    if (pos < fifo_min_pos(from) || pos > fifo_max_pos(from))
+    if (pos < min_pos_unlocked(from) || pos > fifo_max_pos(from))
         return NULL;
 
     return from->mem + ((head_offset + head_mem_offset) % from->size);
@@ -174,9 +194,14 @@ static uint8_t *pos_to_ptr(struct fifo_buf *from, size_t pos)
 
 int fifo_set_pos(struct fifo_buf *buf, size_t pos)
 {
-    if (pos >= fifo_min_pos(buf) && pos < fifo_max_pos(buf)) {
+    pthread_mutex_lock(&buf->lock);
+
+    if (pos >= min_pos_unlocked(buf) && pos < fifo_max_pos(buf)) {
         buf->head = pos_to_ptr(buf, pos);
+
+        buf->bytes_read_from_current_head += ((long)pos - (long)buf->head_pos);
         buf->head_pos = pos;
+        pthread_mutex_unlock(&buf->lock);
         return 1;
     }
 
@@ -184,6 +209,7 @@ int fifo_set_pos(struct fifo_buf *buf, size_t pos)
     buf->tail = buf->head;
     buf->bytes_read_from_current_head = 0;
 
+    pthread_mutex_unlock(&buf->lock);
     return 1;
 }
 
@@ -220,10 +246,14 @@ int fifo_read(struct fifo_buf *src, void *dest, size_t size)
 {
     int bytes_read;
 
+    pthread_mutex_lock(&src->lock);
+
     size = min(src->size, size);
     bytes_read = copy_from(src, (uint8_t *)dest, size);
     src->head_pos += bytes_read;
     src->bytes_read_from_current_head += bytes_read;
+
+    pthread_mutex_unlock(&src->lock);
 
     return bytes_read;
 }
