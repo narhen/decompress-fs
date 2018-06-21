@@ -21,6 +21,7 @@
 struct fifo_buf {
     uint8_t *mem;
     uint8_t *head, *tail;
+    int bytes_read_from_current_head;
 
     size_t head_pos, tail_pos;
     size_t size;
@@ -36,6 +37,7 @@ void fifo_reset(struct fifo_buf *buf)
 {
     buf->head = buf->tail = buf->mem;
     buf->head_pos = buf->tail_pos = 0;
+    buf->bytes_read_from_current_head = 0;
 }
 
 struct fifo_buf *fifo_init(size_t size)
@@ -93,15 +95,19 @@ size_t fifo_curr_pos(struct fifo_buf *buf)
 
 long fifo_min_pos(struct fifo_buf *buf)
 {
-    long min_pos;
+    long min_pos, head_pos;
     uint64_t tail_to_head_dist;
 
     tail_to_head_dist = ptr_distance(buf, buf->tail, buf->head);
     if (!tail_to_head_dist && buf->tail_pos == buf->head_pos)
         tail_to_head_dist = buf->size;
 
-    min_pos = buf->head_pos - tail_to_head_dist;
-    return max(0, min_pos);
+    head_pos = buf->head_pos;
+    min_pos = head_pos - tail_to_head_dist;
+    int max_rewind = min(buf->bytes_read_from_current_head, buf->size);
+    long ret = max(head_pos - max_rewind, min_pos);
+
+    return ret;
 }
 
 size_t fifo_max_pos(struct fifo_buf *buf)
@@ -168,11 +174,15 @@ static uint8_t *pos_to_ptr(struct fifo_buf *from, size_t pos)
 
 int fifo_set_pos(struct fifo_buf *buf, size_t pos)
 {
-    if (pos < fifo_min_pos(buf) || pos > fifo_max_pos(buf))
-        return 0;
+    if (pos >= fifo_min_pos(buf) && pos < fifo_max_pos(buf)) {
+        buf->head = pos_to_ptr(buf, pos);
+        buf->head_pos = pos;
+        return 1;
+    }
 
-    buf->head = pos_to_ptr(buf, pos);
-    buf->head_pos = pos;
+    buf->tail_pos = buf->head_pos = pos;
+    buf->tail = buf->head;
+    buf->bytes_read_from_current_head = 0;
 
     return 1;
 }
@@ -213,6 +223,7 @@ int fifo_read(struct fifo_buf *src, void *dest, size_t size)
     size = min(src->size, size);
     bytes_read = copy_from(src, (uint8_t *)dest, size);
     src->head_pos += bytes_read;
+    src->bytes_read_from_current_head += bytes_read;
 
     return bytes_read;
 }

@@ -106,6 +106,28 @@ static void fifo_write__positions_should_be_updated_correctly(void **state)
     assert_int_equal(fifo_max_pos(buf), sizeof(tmp) + 4);
 }
 
+static void fifo_set_pos__min_pos_should_be_head_pos_when_seeking_outside_of_range(void **state)
+{
+    char tmp[10];
+    struct fifo_buf *buf = *state;
+    size_t new_pos = 2000;
+
+    assert_int_equal(fifo_set_pos(buf, new_pos), 1);
+    assert_int_equal(fifo_curr_pos(buf), new_pos);
+    assert_int_equal(fifo_min_pos(buf), new_pos);
+    assert_int_equal(fifo_max_pos(buf), new_pos);
+
+    assert_int_equal(fifo_write(buf, tmp, sizeof(tmp)), sizeof(tmp));
+    assert_int_equal(fifo_curr_pos(buf), new_pos);
+    assert_int_equal(fifo_min_pos(buf), new_pos);
+    assert_int_equal(fifo_max_pos(buf), new_pos + sizeof(tmp));
+
+    assert_int_equal(fifo_read(buf, tmp, 5), 5);
+    assert_int_equal(fifo_curr_pos(buf), new_pos + 5);
+    assert_int_equal(fifo_min_pos(buf), new_pos);
+    assert_int_equal(fifo_max_pos(buf), new_pos + sizeof(tmp));
+}
+
 int main(void)
 {
     const struct CMUnitTest tests[] = {
@@ -117,6 +139,9 @@ int main(void)
             fifo_write__should_wrap_around_when_hitting_end_of_mem_area, setup, teardown),
         cmocka_unit_test_setup_teardown(
             fifo_write__positions_should_be_updated_correctly, setup, teardown),
+        cmocka_unit_test_setup_teardown(
+            fifo_set_pos__min_pos_should_be_head_pos_when_seeking_outside_of_range, setup,
+            teardown),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
