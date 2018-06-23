@@ -1,4 +1,5 @@
 mem = files('mem.c')
-utils = files('decompress-fs.c', 'utils.c', 'mem.c')
-main = files('decompress-fs.c', 'utils.c', 'mem.c')
-sources += [main, mem, utils]
+decompress = files('decompress-fs.c')
+utils = files('utils.c')
+main = files('main.c')
+sources += [main, decompress, mem, utils]

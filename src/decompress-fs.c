@@ -1,8 +1,8 @@
 #define _GNU_SOURCE
-#define FUSE_USE_VERSION 31
 
 #include "mem.h"
 #include "utils.h"
+#include "decompress-fs.h"
 #include <archive.h>
 #include <archive_entry.h>
 #include <dirent.h>
@@ -14,12 +14,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 #include <pthread.h>
 
-#define ROOT "/home/narhen/tmp"
 #define DEFAULT_MEM_BUF_SIZE (512 * 1024 * 1024) // 512 MiB
 
 const char *supported_formats[] = {
@@ -41,10 +37,6 @@ struct file {
     DIR *dp;
 
     struct virtual_file *vfile;
-};
-
-struct data {
-    int root;
 };
 
 static inline int supported_format(const char *filename)
@@ -70,6 +62,11 @@ static int _archive_stat(struct stat *info, struct archive_entry *ent)
 static inline int root_fd(void)
 {
     return get_data()->root;
+}
+
+static inline const char *root_path(void)
+{
+    return get_data()->root_path;
 }
 
 static inline struct file *get_file(struct fuse_file_info *fi)
@@ -100,9 +97,9 @@ static char *find_archive_for_file(const char *filename)
 {
     struct stat info;
     char *p;
-    char abspath[strlen(ROOT) + strlen(filename) + 2];
+    char abspath[strlen(root_path()) + strlen(filename) + 2];
 
-    sprintf(abspath, "%s/%s", ROOT, filename);
+    sprintf(abspath, "%s/%s", root_path(), filename);
 
     while ((p = strrchr(abspath, ':'))) {
         *p = 0;
@@ -188,7 +185,7 @@ static struct archive *_get_archive(const char *abspath)
 
 static struct archive *get_archive(const char *root, const char *path, const char *name)
 {
-    char filename[strlen(ROOT) + strlen(path) + strlen(name) + 3];
+    char filename[strlen(root_path()) + strlen(path) + strlen(name) + 3];
 
     sprintf(filename, "%s/%s/%s", root, path, name);
     return _get_archive(filename);
@@ -532,7 +529,7 @@ static int fill_compressed_files(
     dirent_size = struct_dirent_size(path);
 
     for (i = 0; i < num_dirents; ++i, curr_ent = dirent_array_next(curr_ent, dirent_size)) {
-        a = get_archive(ROOT, path, curr_ent->d_name);
+        a = get_archive(root_path(), path, curr_ent->d_name);
         if (a == NULL)
             return -errno;
         while (archive_read_next_header(a, &ent) == ARCHIVE_OK) {
@@ -622,24 +619,4 @@ int do_getattr(const char *path, struct stat *info, struct fuse_file_info *fi)
         return 0;
 
     return archive_stat(path, info);
-}
-
-static struct fuse_operations ops = {
-    .opendir = do_opendir,
-    .readdir = do_readdir,
-    .releasedir = do_releasedir,
-    .open = do_open,
-    .release = do_release,
-    //.read = do_read,
-    .read_buf = do_read_buf,
-    .getattr = do_getattr,
-};
-
-int main(int argc, char *argv[])
-{
-    struct data d;
-
-    d.root = open(ROOT, O_PATH);
-
-    return fuse_main(argc, argv, &ops, &d);
 }
