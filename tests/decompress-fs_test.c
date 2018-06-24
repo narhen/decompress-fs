@@ -77,11 +77,46 @@ static int teardown(struct fuse *f, int fs_pid)
     return 0;
 }
 
+static int str_list_contains(char **str_list, int str_list_len, char *str)
+{
+    int i;
+
+    for (i = 0; i < str_list_len; i++)
+        if (!strcmp(str_list[i], str))
+            return 1;
+    return 0;
+}
+
+static void listing_files_test(void **state)
+{
+    DIR *dp;
+    int expected_ent, total_ents_found, expected_ents_found;
+    struct dirent *dent;
+    char *expected_entries[] = {
+        ".", "..", "lorem.txt.tar.bz2", "lorem.txt.tar.bz2:lorem.txt",
+    };
+    int expected_entries_len = sizeof(expected_entries) / sizeof(expected_entries[0]);
+
+    dp = opendir(mountpoint);
+    assert_non_null(dp);
+
+    for (expected_ents_found = total_ents_found = 0; (dent = readdir(dp)) != NULL;
+         ++total_ents_found) {
+        expected_ent = str_list_contains(expected_entries, expected_entries_len, dent->d_name);
+        assert_int_not_equal(0, expected_ent);
+        if (expected_ent)
+            ++expected_ents_found;
+    }
+
+    assert_int_equal(expected_entries_len, expected_ents_found);
+    assert_int_equal(expected_ents_found, total_ents_found);
+}
+
 int main(void)
 {
     int ret, fs_pid;
     struct fuse *f;
-    const struct CMUnitTest tests[] = {};
+    const struct CMUnitTest tests[] = { cmocka_unit_test(listing_files_test) };
 
     f = setup(&fs_pid);
     ret = cmocka_run_group_tests(tests, NULL, NULL);
