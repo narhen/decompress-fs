@@ -35,7 +35,9 @@ void _debug_print(const char *function, char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
-    fprintf(stderr, "%s: ", function);
+
+    fprintf(stderr, "[DEBUG] %s: ", function);
     vfprintf(stderr, fmt, ap);
+
     va_end(ap);
 }

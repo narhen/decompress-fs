@@ -299,7 +299,7 @@ int do_open(const char *path, struct fuse_file_info *fi)
 {
     struct file *file;
 
-    debug("open '%s'\n", path);
+    debug("'%s'\n", path);
 
     file = open_file(path, fi->flags);
     if (!file)
@@ -314,7 +314,7 @@ int do_release(const char *path, struct fuse_file_info *fi)
 {
     struct file *f = (struct file *)fi->fh;
 
-    debug("release %s, %p, %d, %p\n", path, f, f->fd, f->vfile);
+    debug("%s, %p, %d, %p\n", path, f, f->fd, f->vfile);
     free_file(f);
 
     return 0;
@@ -423,7 +423,7 @@ done:
 static int read_vfile(struct virtual_file *vfile, void *buf, size_t size, off_t offset)
 {
     int available_data;
-    debug("%s reading at most %lu bytes into %p from offset %lu\n", __func__, size, buf, offset);
+    debug("reading at most %lu bytes into %p from offset %lu\n", size, buf, offset);
 
     if (fifo_curr_pos(vfile->buf) != offset) {
         if (!vfile_seek(vfile, offset))
@@ -483,7 +483,7 @@ int do_opendir(const char *path, struct fuse_file_info *fi)
 {
     struct file *file = NULL;
 
-    debug("   opendir %d, %p, %s, %p\n", getpid(), fi, path, file);
+    debug("%d, %p, %s, %p\n", getpid(), fi, path, file);
 
     file = open_file(path, fi->flags);
 
@@ -507,7 +507,7 @@ int do_opendir(const char *path, struct fuse_file_info *fi)
 int do_releasedir(const char *path, struct fuse_file_info *fi)
 {
     struct file *f = (struct file *)fi->fh;
-    debug("releasedir %d, %p, %s, %p, %d\n", getpid(), fi, path, f, f->fd);
+    debug("%d, %p, %s, %p, %d\n", getpid(), fi, path, f, f->fd);
 
     free_file(f);
 
@@ -551,7 +551,7 @@ int do_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
     struct dirent *curr, *result, *dirents = calloc(num_dirents, dirent_size);
     struct stat st;
 
-    debug("readdir %d, %p, %s, %p\n", getpid(), fi, path, (void *)fi->fh);
+    debug("%d, %p, %s, %p\n", getpid(), fi, path, (void *)fi->fh);
 
     for (result = curr = dirents; readdir_r(dp, curr, &result) == 0 && result != NULL;
          curr = dirent_array_entry(dirents, dirent_size, curr_dirent)) {
@@ -603,7 +603,7 @@ int do_getattr(const char *path, struct stat *info, struct fuse_file_info *fi)
 {
     struct file *file;
 
-    debug("getattr %p, %s, %s\n", fi, path, get_path(path));
+    debug("%p, %s, %s\n", fi, path, get_path(path));
 
     if (fi) {
         file = (struct file *)fi->fh;

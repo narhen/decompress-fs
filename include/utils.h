@@ -16,7 +16,7 @@
 
 #ifdef DEBUG
 void _debug_print(const char *function, char *fmt, ...);
-#define debug(fmt, ...) _debug_print(__FUNCTION__, " [DEBUG] " fmt, ##__VA_ARGS__)
+#define debug(fmt, ...) _debug_print(__FUNCTION__, fmt, ##__VA_ARGS__)
 #else
 #define debug(fmt, ...)
 #endif
