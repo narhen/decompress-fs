@@ -14,6 +14,13 @@
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
+#ifdef DEBUG
+void _debug_print(const char *function, char *fmt, ...);
+#define debug(fmt, ...) _debug_print(__FUNCTION__, " [DEBUG] " fmt, ##__VA_ARGS__)
+#else
+#define debug(fmt, ...)
+#endif
+
 extern int endswith(const char *str, const char *p);
 extern int endswith_list(const char *str, const char *ps[], size_t ps_len);
 extern int startswith(const char *str, const char *p);

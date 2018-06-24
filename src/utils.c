@@ -1,4 +1,6 @@
 #include <string.h>
+#include <stdarg.h>
+#include <stdio.h>
 
 int endswith(const char *str, const char *p)
 {
@@ -27,4 +29,13 @@ int startswith(const char *str, const char *p)
         return 0;
 
     return !strncmp(str, p, plen);
+}
+
+void _debug_print(const char *function, char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "%s: ", function);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
 }

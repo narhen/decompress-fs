@@ -6,7 +6,7 @@
 
 #define ROOT "/home/narhen/tmp"
 
-static struct fuse_operations ops = {
+struct fuse_operations ops = {
     .opendir = do_opendir,
     .readdir = do_readdir,
     .releasedir = do_releasedir,
@@ -23,6 +23,7 @@ int main(int argc, char *argv[])
 
     d.root = open(ROOT, O_PATH);
     d.root_path = ROOT;
+    d.file_buf_size = 512 * 1024 * 1024; // 512 MiB
 
     return fuse_main(argc, argv, &ops, &d);
 }

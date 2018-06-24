@@ -6,6 +6,7 @@
 
 struct data {
     int root;
+    int file_buf_size; // number of buffer-bytes to allocate for each open file
     const char *root_path;
 };
 

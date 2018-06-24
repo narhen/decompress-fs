@@ -7,11 +7,16 @@ header_files = []
 test_sources = []
 
 subdir('src')
+subdir('include')
 subdir('tests')
 
 dependencies = [dependency('fuse3'), dependency('libarchive')]
 
-executable('decompressfs', sources, include_directories: inc, dependencies: dependencies)
+executable('decompressfs',
+           sources + [main],
+           include_directories: inc,
+           dependencies: dependencies,
+           c_args: ['-DDEBUG'])
 
 
 configure_file(input : '.clang-format',
