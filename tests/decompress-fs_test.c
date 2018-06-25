@@ -65,9 +65,6 @@ static struct fuse *setup(int *fs_pid)
 
 static int teardown(struct fuse *f, int fs_pid)
 {
-    char mountpoint[PATH_MAX];
-    realpath(MOUNTPOINT, mountpoint);
-
     kill(fs_pid, SIGTERM);
     waitpid(fs_pid, NULL, 0);
 
@@ -93,7 +90,7 @@ static void listing_files_test(void **state)
     int expected_ent, total_ents_found, expected_ents_found;
     struct dirent *dent;
     char *expected_entries[] = {
-        ".", "..", "lorem.txt.tar.bz2", "lorem.txt.tar.bz2:lorem.txt",
+        ".", "..", "lorem.txt.tar.bz2", "lorem.txt", "lorem.txt.tar.bz2:lorem.txt",
     };
     int expected_entries_len = sizeof(expected_entries) / sizeof(expected_entries[0]);
 
@@ -112,11 +109,27 @@ static void listing_files_test(void **state)
     assert_int_equal(expected_ents_found, total_ents_found);
 }
 
+static void stat_test(void **state)
+{
+    char buf[PATH_MAX];
+    struct stat mounted, original;
+
+    sprintf(buf, "%s/lorem.txt.tar.bz2:lorem.txt", mountpoint);
+    stat(buf, &mounted);
+
+    sprintf(buf, "%s/lorem.txt", root_dir);
+    stat(buf, &original);
+
+    assert_int_equal(mounted.st_size, original.st_size);
+    assert_int_equal(mounted.st_mode, original.st_mode);
+}
+
 int main(void)
 {
     int ret, fs_pid;
     struct fuse *f;
-    const struct CMUnitTest tests[] = { cmocka_unit_test(listing_files_test) };
+    const struct CMUnitTest tests[]
+        = { cmocka_unit_test(listing_files_test), cmocka_unit_test(stat_test) };
 
     f = setup(&fs_pid);
     ret = cmocka_run_group_tests(tests, NULL, NULL);
