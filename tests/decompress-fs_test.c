@@ -46,7 +46,7 @@ static struct fuse *setup(int *fs_pid)
 
     d.root_path = root_dir;
     d.root = open(d.root_path, O_PATH);
-    d.file_buf_size = 64;
+    d.file_buf_size = 4096;
 
     args.argv = argv;
     args.argc = sizeof(argv) / sizeof(argv[0]);
