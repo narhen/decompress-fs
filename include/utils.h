@@ -13,6 +13,8 @@
     ((struct dirent *)(((uint8_t *)(dent_array)) + ((dent_size)*1)))
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#define MOD(a, b) ((((a) % (b)) + (b)) % (b))
 
 #ifdef DEBUG
 void _debug_print(const char *function, char *fmt, ...);

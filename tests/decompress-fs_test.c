@@ -124,12 +124,41 @@ static void stat_test(void **state)
     assert_int_equal(mounted.st_mode, original.st_mode);
 }
 
+static void read_test(void **state)
+{
+    char buf[PATH_MAX];
+    char original_content[4096], fs_content[4096];
+    struct stat info;
+    int fd, ret;
+
+    memset(original_content, 0, sizeof(original_content));
+    memset(fs_content, 0, sizeof(original_content));
+
+    sprintf(buf, "%s/lorem.txt", root_dir);
+    fd = open(buf, O_RDONLY);
+    assert_int_not_equal(fd, -1);
+
+    stat(buf, &info);
+    ret = read(fd, original_content, sizeof(original_content));
+    assert_int_equal(ret, info.st_size);
+
+    sprintf(buf, "%s/lorem.txt.tar.bz2:lorem.txt", mountpoint);
+    fd = open(buf, O_RDONLY);
+    assert_int_not_equal(fd, -1);
+
+    stat(buf, &info);
+    ret = read(fd, fs_content, sizeof(fs_content));
+    assert_int_equal(ret, info.st_size);
+
+    assert_memory_equal(original_content, fs_content, info.st_size);
+}
+
 int main(void)
 {
     int ret, fs_pid;
     struct fuse *f;
-    const struct CMUnitTest tests[]
-        = { cmocka_unit_test(listing_files_test), cmocka_unit_test(stat_test) };
+    const struct CMUnitTest tests[] = { cmocka_unit_test(listing_files_test),
+        cmocka_unit_test(stat_test), cmocka_unit_test(read_test) };
 
     f = setup(&fs_pid);
     ret = cmocka_run_group_tests(tests, NULL, NULL);

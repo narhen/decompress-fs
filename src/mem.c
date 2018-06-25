@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "utils.h"
 
 #ifdef UNIT_TEST
 #include <setjmp.h>
@@ -14,10 +15,6 @@
 #define calloc(nmemb, size) test_calloc((nmemb), (size))
 #define free(ptr) test_free((ptr))
 #endif
-
-#define min(a, b) ((a) < (b) ? (a) : (b))
-#define max(a, b) ((a) > (b) ? (a) : (b))
-#define MOD(a, b) ((((a) % (b)) + (b)) % (b))
 
 struct fifo_buf {
     uint8_t *mem;
