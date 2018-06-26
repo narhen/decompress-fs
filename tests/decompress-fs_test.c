@@ -18,7 +18,7 @@
 
 #define ROOT "../tests/data"
 #define MOUNTPOINT "../tests/mnt"
-
+#define FIFO_BUF_SIZE 1024
 char root_dir[PATH_MAX];
 char mountpoint[PATH_MAX];
 
@@ -46,7 +46,7 @@ static struct fuse *setup(int *fs_pid)
 
     d.root_path = root_dir;
     d.root = open(d.root_path, O_PATH);
-    d.file_buf_size = 4096;
+    d.file_buf_size = FIFO_BUF_SIZE;
 
     args.argv = argv;
     args.argc = sizeof(argv) / sizeof(argv[0]);
@@ -84,7 +84,7 @@ static int str_list_contains(char **str_list, int str_list_len, char *str)
     return 0;
 }
 
-static void listing_files_test(void **state)
+static void readdir__should_list_expected_files(void **state)
 {
     DIR *dp;
     int expected_ent, total_ents_found, expected_ents_found;
@@ -109,7 +109,7 @@ static void listing_files_test(void **state)
     assert_int_equal(expected_ents_found, total_ents_found);
 }
 
-static void stat_test(void **state)
+static void stat__should_provide_correct_meta_data(void **state)
 {
     char buf[PATH_MAX];
     struct stat mounted, original;
@@ -124,7 +124,7 @@ static void stat_test(void **state)
     assert_int_equal(mounted.st_mode, original.st_mode);
 }
 
-static void read_test(void **state)
+static void read__should_read_the_entire_file_without_errors(void **state)
 {
     char buf[PATH_MAX];
     char original_content[4096], fs_content[4096];
@@ -157,8 +157,9 @@ int main(void)
 {
     int ret, fs_pid;
     struct fuse *f;
-    const struct CMUnitTest tests[] = { cmocka_unit_test(listing_files_test),
-        cmocka_unit_test(stat_test), cmocka_unit_test(read_test) };
+    const struct CMUnitTest tests[] = { cmocka_unit_test(readdir__should_list_expected_files),
+        cmocka_unit_test(stat__should_provide_correct_meta_data),
+        cmocka_unit_test(read__should_read_the_entire_file_without_errors) };
 
     f = setup(&fs_pid);
     ret = cmocka_run_group_tests(tests, NULL, NULL);
