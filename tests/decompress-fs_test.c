@@ -18,7 +18,7 @@
 
 #define ROOT "../tests/data"
 #define MOUNTPOINT "../tests/mnt"
-#define FIFO_BUF_SIZE 1024
+#define FIFO_BUF_SIZE 128
 char root_dir[PATH_MAX];
 char mountpoint[PATH_MAX];
 
@@ -74,6 +74,22 @@ static int teardown(struct fuse *f, int fs_pid)
     return 0;
 }
 
+static int fs_open(char *file)
+{
+    char buf[PATH_MAX];
+
+    sprintf(buf, "%s/%s", mountpoint, file);
+    return open(buf, O_RDONLY);
+}
+
+static int root_open(char *file)
+{
+    char buf[PATH_MAX];
+
+    sprintf(buf, "%s/%s", root_dir, file);
+    return open(buf, O_RDONLY);
+}
+
 static int str_list_contains(char **str_list, int str_list_len, char *str)
 {
     int i;
@@ -126,31 +142,50 @@ static void stat__should_provide_correct_meta_data(void **state)
 
 static void read__should_read_the_entire_file_without_errors(void **state)
 {
-    char buf[PATH_MAX];
     char original_content[4096], fs_content[4096];
     struct stat info;
     int fd, ret;
 
     memset(original_content, 0, sizeof(original_content));
-    memset(fs_content, 0, sizeof(original_content));
+    memset(fs_content, 0, sizeof(fs_content));
 
-    sprintf(buf, "%s/lorem.txt", root_dir);
-    fd = open(buf, O_RDONLY);
+    fd = root_open("/lorem.txt");
     assert_int_not_equal(fd, -1);
 
-    stat(buf, &info);
+    fstat(fd, &info);
     ret = read(fd, original_content, sizeof(original_content));
     assert_int_equal(ret, info.st_size);
 
-    sprintf(buf, "%s/lorem.txt.tar.bz2:lorem.txt", mountpoint);
-    fd = open(buf, O_RDONLY);
+    fd = fs_open("/lorem.txt.tar.bz2:lorem.txt");
     assert_int_not_equal(fd, -1);
 
-    stat(buf, &info);
+    fstat(fd, &info);
     ret = read(fd, fs_content, sizeof(fs_content));
     assert_int_equal(ret, info.st_size);
 
     assert_memory_equal(original_content, fs_content, info.st_size);
+}
+
+static void seek__should_seek_to_correct_location(void **state)
+{
+    char original_content[4096], fs_buf[256];
+    int fd, ret, orig_size;
+
+    memset(original_content, 0, sizeof(original_content));
+    memset(fs_buf, 0, sizeof(fs_buf));
+
+    fd = root_open("/lorem.txt");
+    orig_size = read(fd, original_content, sizeof(original_content));
+
+    fd = fs_open("/lorem.txt.tar.bz2:lorem.txt");
+    ret = lseek(fd, 256, SEEK_END);
+    assert_int_not_equal(ret, -1);
+
+    memset(fs_buf, 0, sizeof(fs_buf));
+    ret = read(fd, fs_buf, sizeof(fs_buf));
+    assert_int_equal(ret, sizeof(fs_buf));
+
+    assert_memory_equal(fs_buf, original_content + orig_size - 256, 256);
 }
 
 int main(void)
@@ -159,7 +194,8 @@ int main(void)
     struct fuse *f;
     const struct CMUnitTest tests[] = { cmocka_unit_test(readdir__should_list_expected_files),
         cmocka_unit_test(stat__should_provide_correct_meta_data),
-        cmocka_unit_test(read__should_read_the_entire_file_without_errors) };
+        cmocka_unit_test(read__should_read_the_entire_file_without_errors),
+        cmocka_unit_test(seek__should_seek_to_correct_location) };
 
     f = setup(&fs_pid);
     ret = cmocka_run_group_tests(tests, NULL, NULL);
