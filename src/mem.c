@@ -65,6 +65,11 @@ struct fifo_buf *fifo_init(size_t size)
     return buf;
 }
 
+size_t fifo_buffer_size(struct fifo_buf *buf)
+{
+    return buf->size;
+}
+
 static inline uint64_t ptr_distance(struct fifo_buf *buf, uint8_t *from, uint8_t *to)
 {
     int64_t dist;

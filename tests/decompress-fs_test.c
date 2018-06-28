@@ -118,7 +118,7 @@ static void readdir__should_list_expected_files(void **state)
     assert_non_null(dp);
 
     for (expected_ents_found = total_ents_found = 0; (dent = readdir(dp)) != NULL;
-            ++total_ents_found) {
+         ++total_ents_found) {
         expected_ent = str_list_contains(expected_entries, expected_entries_len, dent->d_name);
         assert_int_not_equal(0, expected_ent);
         if (expected_ent)

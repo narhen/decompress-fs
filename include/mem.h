@@ -7,6 +7,7 @@ struct fifo_buf;
 extern void fifo_free(struct fifo_buf *buf);
 extern void fifo_reset(struct fifo_buf *buf);
 extern struct fifo_buf *fifo_init(size_t size);
+extern size_t fifo_buffer_size(struct fifo_buf *buf);
 extern int fifo_available_data(struct fifo_buf *buf);
 extern int fifo_write(struct fifo_buf *buf, void *data, size_t len);
 extern int fifo_read(struct fifo_buf *src, void *dest, size_t size);

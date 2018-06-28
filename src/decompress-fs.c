@@ -303,9 +303,9 @@ int do_open(const char *path, struct fuse_file_info *fi)
 {
     struct file *file;
 
-    debug("'%s'\n", path);
-
     file = open_file(path, fi->flags);
+    debug("%p '%s'\n", file->vfile, path);
+
     if (!file)
         return -errno;
 
@@ -326,41 +326,44 @@ int do_release(const char *path, struct fuse_file_info *fi)
 
 static int vfile_read(struct virtual_file *vfile, size_t size, char *dest_buf)
 {
-    int bytes_read, res;
-    uint8_t *mem = NULL;
-    off_t offset;
-    size_t block_size = 0;
+    int bytes_read, res, mem_size;
+    uint8_t *mem;
+
+    debug("Reading at most %lu bytes into buffer? %p\n", size, dest_buf);
+
+    mem_size = fifo_buffer_size(vfile->buf);
+    mem = calloc(1, mem_size);
+    if (!mem)
+        return -ENOMEM;
 
     bytes_read = 0;
     while (bytes_read < size) {
-        res = archive_read_data_block(vfile->archive, (const void **)&mem, &block_size, &offset);
-        if (res == ARCHIVE_EOF)
+        res = archive_read_data(vfile->archive, mem, mem_size);
+        if (!res || res == ARCHIVE_EOF)
             break;
         else if (res == ARCHIVE_FATAL) {
             debug("archive_read_data_block: %s\n", archive_error_string(vfile->archive));
-            return -EOF;
-        }
-
-        if (!block_size || !mem) {
-            debug("block size = %d, mem == %p. WTH!?\n", block_size, mem);
-            continue;
+            bytes_read = -EOF;
+            goto done;
         }
 
         if (dest_buf) {
-            res = min(block_size, size - bytes_read);
-            memcpy(dest_buf + bytes_read, mem, res);
+            int max_copy = min(res, size - bytes_read);
+            memcpy(dest_buf + bytes_read, mem, max_copy);
+            debug("wrote %d bytes to buffer @ %p\n", dest_buf);
 
-            bytes_read += res;
+            bytes_read += max_copy;
         }
 
-        res = fifo_write(vfile->buf, mem, block_size);
-        if (res != block_size)
-            return -ENOMEM;
+        res = fifo_write(vfile->buf, mem, res);
+        debug("wrote %d bytes into fifo\n", res);
 
         if (!dest_buf)
             bytes_read += res;
     }
 
+done:
+    free(mem);
     return bytes_read;
 }
 
@@ -411,6 +414,7 @@ static int read_vfile_buf(
 
     buf = bufs->buf;
     available_data = fifo_available_data(file->buf);
+    debug("available data::::: %d\n", available_data);
     if (available_data > 0) {
         buf->mem = calloc(1, available_data);
         if (!buf->mem) {
