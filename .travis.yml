@@ -1,0 +1,12 @@
+language: c
+sudo: false
+services:
+    - docker
+before_install:
+    - docker pull jpakkane/mesonci:bionic
+script:
+    - echo FROM jpakkane/mesonci:bionic > Dockerfile
+    - echo ADD . /root >> Dockerfile
+    - echo RUN apt-get update && apt-get install --yes fuse3 libfuse3-dev libarchive libarchive-dev cmocka
+    - docker build -t withgit .
+      docker run withgit /bin/sh -c "cd /root && TRAVIS=true CC=$CC CXX=$CXX meson builddir && cd builddir && ninja test"
