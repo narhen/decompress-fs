@@ -397,7 +397,7 @@ static int read_vfile_buf(
 
     pthread_mutex_lock(&file->lock);
 
-    debug("read_vfile_buf: size: %lu, offset: %lu, file: %p\n", size, offset, file);
+    debug("size: %lu, offset: %lu, file: %p\n", size, offset, file);
 
     bufs = calloc(1, fuse_bufvec_size(num_bufs));
     if (!bufs) {

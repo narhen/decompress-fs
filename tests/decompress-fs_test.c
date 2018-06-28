@@ -19,6 +19,10 @@
 #define ROOT "../tests/data"
 #define MOUNTPOINT "../tests/mnt"
 #define FIFO_BUF_SIZE 128
+#define DECOMPRESSED_FILE "data.bin"
+#define COMPRESSED_FILE "data.bin.tar.bz2"
+#define VIRTUAL_FILE "data.bin.tar.bz2:data.bin"
+
 char root_dir[PATH_MAX];
 char mountpoint[PATH_MAX];
 
@@ -106,7 +110,7 @@ static void readdir__should_list_expected_files(void **state)
     int expected_ent, total_ents_found, expected_ents_found;
     struct dirent *dent;
     char *expected_entries[] = {
-        ".", "..", "lorem.txt.tar.bz2", "lorem.txt", "lorem.txt.tar.bz2:lorem.txt",
+        ".", "..", DECOMPRESSED_FILE, COMPRESSED_FILE, VIRTUAL_FILE,
     };
     int expected_entries_len = sizeof(expected_entries) / sizeof(expected_entries[0]);
 
@@ -114,7 +118,7 @@ static void readdir__should_list_expected_files(void **state)
     assert_non_null(dp);
 
     for (expected_ents_found = total_ents_found = 0; (dent = readdir(dp)) != NULL;
-         ++total_ents_found) {
+            ++total_ents_found) {
         expected_ent = str_list_contains(expected_entries, expected_entries_len, dent->d_name);
         assert_int_not_equal(0, expected_ent);
         if (expected_ent)
@@ -130,10 +134,10 @@ static void stat__should_provide_correct_meta_data(void **state)
     char buf[PATH_MAX];
     struct stat mounted, original;
 
-    sprintf(buf, "%s/lorem.txt.tar.bz2:lorem.txt", mountpoint);
+    sprintf(buf, "%s/" VIRTUAL_FILE, mountpoint);
     stat(buf, &mounted);
 
-    sprintf(buf, "%s/lorem.txt", root_dir);
+    sprintf(buf, "%s/" DECOMPRESSED_FILE, root_dir);
     stat(buf, &original);
 
     assert_int_equal(mounted.st_size, original.st_size);
@@ -142,28 +146,29 @@ static void stat__should_provide_correct_meta_data(void **state)
 
 static void read__should_read_the_entire_file_without_errors(void **state)
 {
-    char original_content[4096], fs_content[4096];
+    char *original_content, *fs_content;
     struct stat info;
     int fd, ret;
 
-    memset(original_content, 0, sizeof(original_content));
-    memset(fs_content, 0, sizeof(fs_content));
-
-    fd = root_open("/lorem.txt");
+    fd = root_open("/" DECOMPRESSED_FILE);
     assert_int_not_equal(fd, -1);
 
     fstat(fd, &info);
-    ret = read(fd, original_content, sizeof(original_content));
+    original_content = calloc(1, info.st_size);
+    ret = read(fd, original_content, info.st_size);
     assert_int_equal(ret, info.st_size);
 
-    fd = fs_open("/lorem.txt.tar.bz2:lorem.txt");
+    fd = fs_open("/" VIRTUAL_FILE);
     assert_int_not_equal(fd, -1);
 
     fstat(fd, &info);
-    ret = read(fd, fs_content, sizeof(fs_content));
+    fs_content = calloc(1, info.st_size);
+    ret = read(fd, fs_content, info.st_size);
     assert_int_equal(ret, info.st_size);
 
     assert_memory_equal(original_content, fs_content, info.st_size);
+    free(original_content);
+    free(fs_content);
 }
 
 static void seek__should_seek_to_correct_location(void **state)
@@ -171,17 +176,14 @@ static void seek__should_seek_to_correct_location(void **state)
     char original_content[4096], fs_buf[256];
     int fd, ret, orig_size;
 
-    memset(original_content, 0, sizeof(original_content));
-    memset(fs_buf, 0, sizeof(fs_buf));
-
-    fd = root_open("/lorem.txt");
+    fd = root_open("/" DECOMPRESSED_FILE);
+    ret = lseek(fd, -4096, SEEK_END);
     orig_size = read(fd, original_content, sizeof(original_content));
 
-    fd = fs_open("/lorem.txt.tar.bz2:lorem.txt");
-    ret = lseek(fd, 256, SEEK_END);
+    fd = fs_open("/" VIRTUAL_FILE);
+    ret = lseek(fd, -256, SEEK_END);
     assert_int_not_equal(ret, -1);
 
-    memset(fs_buf, 0, sizeof(fs_buf));
     ret = read(fd, fs_buf, sizeof(fs_buf));
     assert_int_equal(ret, sizeof(fs_buf));
 
