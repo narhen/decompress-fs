@@ -133,7 +133,7 @@ static struct archive *_get_rar_archive(const char *abspath, struct archive *a)
 
     filename[strlen(filename) - 2] = 0; // cut off the "ar" part of "...rar"
 
-    i = 0;
+    i = 1;
     while ((ent = readdir(dp)) != NULL) {
         if (!startswith(ent->d_name, filename))
             continue;
@@ -143,16 +143,17 @@ static struct archive *_get_rar_archive(const char *abspath, struct archive *a)
     }
 
     if (i == 1) {
-        if (archive_read_open_filename(a, multipart_archive_entries[0], 10240) != ARCHIVE_OK) {
+        if (archive_read_open_filename(a, multipart_archive_entries[1], 10240) != ARCHIVE_OK) {
             archive_read_free(a);
             return NULL;
         }
         return a;
     }
 
-    qsort(multipart_archive_entries, i, sizeof(char *), cmpstringp);
+    qsort(&multipart_archive_entries[1], i - 1, sizeof(char *), cmpstringp);
 
-    multipart_archive_entries[i] = NULL;
+    multipart_archive_entries[0] = multipart_archive_entries[i - 1];
+    multipart_archive_entries[i - 1] = NULL;
     if (archive_read_open_filenames(a, (const char **)multipart_archive_entries, 10240)
         != ARCHIVE_OK) {
         archive_read_free(a);
@@ -345,7 +346,6 @@ static int vfile_read(struct virtual_file *vfile, size_t size, char *dest_buf)
             bytes_read = -EOF;
             goto done;
         }
-
 
         if (dest_buf) {
             int max_copy = min(res, size - bytes_read);
