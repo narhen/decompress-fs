@@ -326,10 +326,9 @@ int do_release(const char *path, struct fuse_file_info *fi)
 
 static int vfile_read(struct virtual_file *vfile, size_t size, char *dest_buf)
 {
-    int bytes_read, res, mem_size;
+    int bytes_read, mem_size;
+    long res;
     uint8_t *mem;
-
-    debug("Reading at most %lu bytes into buffer? %p\n", size, dest_buf);
 
     mem_size = fifo_buffer_size(vfile->buf);
     mem = calloc(1, mem_size);
@@ -341,22 +340,21 @@ static int vfile_read(struct virtual_file *vfile, size_t size, char *dest_buf)
         res = archive_read_data(vfile->archive, mem, mem_size);
         if (!res || res == ARCHIVE_EOF)
             break;
-        else if (res == ARCHIVE_FATAL) {
+        else if (res < 0) {
             debug("archive_read_data_block: %s\n", archive_error_string(vfile->archive));
             bytes_read = -EOF;
             goto done;
         }
 
+
         if (dest_buf) {
             int max_copy = min(res, size - bytes_read);
             memcpy(dest_buf + bytes_read, mem, max_copy);
-            debug("wrote %d bytes to buffer @ %p\n", dest_buf);
 
             bytes_read += max_copy;
         }
 
         res = fifo_write(vfile->buf, mem, res);
-        debug("wrote %d bytes into fifo\n", res);
 
         if (!dest_buf)
             bytes_read += res;
@@ -414,7 +412,6 @@ static int read_vfile_buf(
 
     buf = bufs->buf;
     available_data = fifo_available_data(file->buf);
-    debug("available data::::: %d\n", available_data);
     if (available_data > 0) {
         buf->mem = calloc(1, available_data);
         if (!buf->mem) {
