@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "decompress-fs.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -35,6 +36,11 @@ struct fuse_operations ops = {
     .read_buf = do_read_buf,
     .getattr = do_getattr,
 };
+
+static bool can_run_tests(void)
+{
+    return access("/dev/fuse", F_OK) != -1;
+}
 
 static struct fuse *setup(int *fs_pid)
 {
@@ -198,6 +204,9 @@ int main(void)
         cmocka_unit_test(stat__should_provide_correct_meta_data),
         cmocka_unit_test(read__should_read_the_entire_file_without_errors),
         cmocka_unit_test(seek__should_seek_to_correct_location) };
+
+    if (!can_run_tests())
+        return 77;
 
     f = setup(&fs_pid);
     ret = cmocka_run_group_tests(tests, NULL, NULL);

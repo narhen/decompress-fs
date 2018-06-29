@@ -1,0 +1,11 @@
+language: c
+sudo: false
+services:
+    - docker
+before_install:
+    - docker pull archimg/base
+script:
+    - echo FROM archimg/base > Dockerfile
+    - echo "RUN pacman -Sy && pacman -S --noconfirm cmocka meson fuse3 libarchive gcc pkg-config" >> Dockerfile
+    - docker build -t testimg .
+    - docker run -v $PWD:/mnt testimg /bin/bash -c "cd /mnt && meson builddir && cd builddir && ninja test"
