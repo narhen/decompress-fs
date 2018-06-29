@@ -543,29 +543,24 @@ int do_releasedir(const char *path, struct fuse_file_info *fi)
 }
 
 static int fill_compressed_files(
-    void *buf, fuse_fill_dir_t filler, const char *path, struct dirent *dirents, int num_dirents)
+    void *buf, fuse_fill_dir_t filler, const char *path, char *archive_name)
 {
-    int i, dirent_size;
-    struct dirent *curr_ent = dirents;
     struct archive *a;
     struct archive_entry *ent;
     char filename[1024];
 
-    dirent_size = struct_dirent_size(path);
+    a = get_archive(root_path(), path, archive_name);
+    if (a == NULL)
+        return -errno;
 
-    for (i = 0; i < num_dirents; ++i, curr_ent = dirent_array_next(curr_ent, dirent_size)) {
-        a = get_archive(root_path(), path, curr_ent->d_name);
-        if (a == NULL)
-            return -errno;
-        while (archive_read_next_header(a, &ent) == ARCHIVE_OK) {
-            sprintf(filename, "%s:%s", curr_ent->d_name, archive_entry_pathname(ent));
-            if (filler(buf, filename, NULL, 0, 0)) {
-                archive_read_free(a);
-                return 0;
-            }
+    while (archive_read_next_header(a, &ent) == ARCHIVE_OK) {
+        sprintf(filename, "%s:%s", archive_name, archive_entry_pathname(ent));
+        if (filler(buf, filename, NULL, 0, 0)) {
+            archive_read_free(a);
+            return 0;
         }
-        archive_read_free(a);
     }
+    archive_read_free(a);
 
     return 0;
 }
@@ -574,35 +569,24 @@ int do_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
     struct fuse_file_info *fi, enum fuse_readdir_flags flags)
 {
     DIR *dp = ((struct file *)fi->fh)->dp;
-    int num_dirents = 8, curr_dirent = 0;
-    int ret = 0, dirent_size = struct_dirent_size(get_path(path));
-    struct dirent *curr, *result, *dirents = calloc(num_dirents, dirent_size);
+    int ret = 0;
+    struct dirent *curr;
     struct stat st;
 
     debug("%d, %p, %s, %p\n", getpid(), fi, path, (void *)fi->fh);
 
-    for (result = curr = dirents; readdir_r(dp, curr, &result) == 0 && result != NULL;
-         curr = dirent_array_entry(dirents, dirent_size, curr_dirent)) {
+    while ((curr = readdir(dp))) {
         memset(&st, 0, sizeof(st));
         st.st_ino = curr->d_ino;
         st.st_mode = curr->d_type << 12;
         if (filler(buf, curr->d_name, &st, 0, 0))
-            goto done;
+            break;
 
-        if (!supported_format(curr->d_name))
-            continue;
-
-        if (++curr_dirent < num_dirents)
-            continue;
-
-        num_dirents *= 2;
-        dirents = realloc(dirents, num_dirents * dirent_size);
+        if (supported_format(curr->d_name)
+            && fill_compressed_files(buf, filler, get_path(path), curr->d_name) < 0)
+            break;
     }
 
-    ret = fill_compressed_files(buf, filler, get_path(path), dirents, curr_dirent);
-
-done:
-    free(dirents);
     return ret;
 }
 

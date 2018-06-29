@@ -80,7 +80,7 @@ static int teardown(struct fuse *f, int fs_pid)
 
 static int fs_open(char *file)
 {
-    char buf[PATH_MAX];
+    char buf[sizeof(mountpoint) + strlen(file) + 1];
 
     sprintf(buf, "%s/%s", mountpoint, file);
     return open(buf, O_RDONLY);
@@ -88,7 +88,7 @@ static int fs_open(char *file)
 
 static int root_open(char *file)
 {
-    char buf[PATH_MAX];
+    char buf[sizeof(mountpoint) + strlen(file) + 1];
 
     sprintf(buf, "%s/%s", root_dir, file);
     return open(buf, O_RDONLY);
@@ -131,7 +131,7 @@ static void readdir__should_list_expected_files(void **state)
 
 static void stat__should_provide_correct_meta_data(void **state)
 {
-    char buf[PATH_MAX];
+    char buf[strlen(VIRTUAL_FILE) + sizeof(mountpoint) + 2];
     struct stat mounted, original;
 
     sprintf(buf, "%s/" VIRTUAL_FILE, mountpoint);
