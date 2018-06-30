@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "decompress-fs.h"
 #include <stdbool.h>
+#include <sys/statvfs.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -48,7 +49,7 @@ static struct fuse *setup(int *fs_pid)
     struct fuse *f;
     struct fuse_args args;
     struct data d;
-    char *argv[] = { "integration_test" };
+    char *argv[] = { "integration_test", "-o", "ro" };
 
     realpath(ROOT, root_dir);
     realpath(MOUNTPOINT, mountpoint);
@@ -210,6 +211,15 @@ static void access__should_succeed(void **state)
     assert_int_equal(access(buf, F_OK), -1);
 }
 
+static void statvfs__should_say_the_fs_is_readonly(void **state)
+{
+    struct statvfs info;
+
+    assert_int_equal(statvfs(mountpoint, &info), 0);
+
+    assert_int_equal(info.f_flag & ST_RDONLY, ST_RDONLY);
+}
+
 int main(void)
 {
     int ret, fs_pid;
@@ -220,6 +230,7 @@ int main(void)
         cmocka_unit_test(read__should_read_the_entire_file_without_errors),
         cmocka_unit_test(seek__should_seek_to_correct_location),
         cmocka_unit_test(access__should_succeed),
+        cmocka_unit_test(statvfs__should_say_the_fs_is_readonly),
     };
 
     if (!can_run_tests())
