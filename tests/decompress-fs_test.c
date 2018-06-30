@@ -200,7 +200,7 @@ static void seek__should_seek_to_correct_location(void **state)
 
 static void access__should_succeed(void **state)
 {
-    char buf[1024];
+    char buf[sizeof(mountpoint) + 16];
 
     assert_int_equal(access(mountpoint, F_OK), 0);
     assert_int_equal(access(mountpoint, R_OK), 0);
