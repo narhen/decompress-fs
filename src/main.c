@@ -55,6 +55,8 @@ void parse_args(int argc, char **argv)
     options.fuse_args[options.num_fuse_args++] = argv[0];
     options.fuse_args[options.num_fuse_args++] = "-o";
     options.fuse_args[options.num_fuse_args++] = "ro";
+    options.fuse_args[options.num_fuse_args++] = "-o";
+    options.fuse_args[options.num_fuse_args++] = "allow_other";
 
     while ((c = getopt_long(argc, argv, "fs:", long_options, &option_index)) != -1) {
         switch (c) {
