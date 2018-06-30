@@ -57,6 +57,7 @@ static int _archive_stat(struct stat *info, struct archive_entry *ent)
         return -EACCES;
 
     memcpy(info, archive_entry_stat(ent), sizeof(*info));
+    info->st_mode &= ~0222; // clear the write bit
     return 0;
 }
 
@@ -624,8 +625,32 @@ int do_getattr(const char *path, struct stat *info, struct fuse_file_info *fi)
         return _archive_stat(info, file->vfile->archive_entry);
     }
 
-    if (!fstatat(root_fd(), get_path(path), info, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW))
+    if (!fstatat(root_fd(), get_path(path), info, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW)) {
+        info->st_mode &= ~0222; // clear the write-bit
         return 0;
+    }
 
     return archive_stat(path, info);
+}
+
+int do_access(const char *path, int mode)
+{
+    int ret;
+    struct stat info;
+
+    ret = fstatat(root_fd(), get_path(path), &info, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW);
+    if (ret < 0)
+        ret = archive_stat(path, &info);
+    if (ret < 0)
+        return -1;
+
+    switch (mode) {
+    case F_OK:
+    case R_OK:
+    case X_OK:
+        return 0;
+    case W_OK:
+    default:
+        return -1;
+    }
 }

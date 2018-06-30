@@ -21,5 +21,6 @@ extern int do_releasedir(const char *path, struct fuse_file_info *fi);
 extern int do_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
     struct fuse_file_info *fi, enum fuse_readdir_flags flags);
 extern int do_getattr(const char *path, struct stat *info, struct fuse_file_info *fi);
+extern int do_access(const char *path, int mode);
 
 #endif

@@ -29,6 +29,7 @@ struct fuse_operations ops = {
     .release = do_release,
     .read_buf = do_read_buf,
     .getattr = do_getattr,
+    .access = do_access,
 };
 
 void usage(char **argv, struct option *options)

@@ -35,6 +35,7 @@ struct fuse_operations ops = {
     .release = do_release,
     .read_buf = do_read_buf,
     .getattr = do_getattr,
+    .access = do_access,
 };
 
 static bool can_run_tests(void)
@@ -147,7 +148,7 @@ static void stat__should_provide_correct_meta_data(void **state)
     stat(buf, &original);
 
     assert_int_equal(mounted.st_size, original.st_size);
-    assert_int_equal(mounted.st_mode, original.st_mode);
+    assert_int_equal(mounted.st_mode, original.st_mode & ~0222); // write bit should not be set
 }
 
 static void read__should_read_the_entire_file_without_errors(void **state)
@@ -196,14 +197,30 @@ static void seek__should_seek_to_correct_location(void **state)
     assert_memory_equal(fs_buf, original_content + orig_size - 256, 256);
 }
 
+static void access__should_succeed(void **state)
+{
+    char buf[1024];
+
+    assert_int_equal(access(mountpoint, F_OK), 0);
+    assert_int_equal(access(mountpoint, R_OK), 0);
+    assert_int_equal(access(mountpoint, W_OK), -1);
+    assert_int_equal(access(mountpoint, X_OK), 0);
+
+    sprintf(buf, "%s/randomjunk", mountpoint);
+    assert_int_equal(access(buf, F_OK), -1);
+}
+
 int main(void)
 {
     int ret, fs_pid;
     struct fuse *f;
-    const struct CMUnitTest tests[] = { cmocka_unit_test(readdir__should_list_expected_files),
+    const struct CMUnitTest tests[] = {
+        cmocka_unit_test(readdir__should_list_expected_files),
         cmocka_unit_test(stat__should_provide_correct_meta_data),
         cmocka_unit_test(read__should_read_the_entire_file_without_errors),
-        cmocka_unit_test(seek__should_seek_to_correct_location) };
+        cmocka_unit_test(seek__should_seek_to_correct_location),
+        cmocka_unit_test(access__should_succeed),
+    };
 
     if (!can_run_tests())
         return 77;
