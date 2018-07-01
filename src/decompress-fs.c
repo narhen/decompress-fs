@@ -243,7 +243,8 @@ static inline void free_archive(struct archive *a)
 static void free_virtual_file(struct virtual_file *vfile)
 {
     free_archive(vfile->archive);
-    fifo_free(vfile->buf);
+    if (vfile->buf)
+        fifo_free(vfile->buf);
     free(vfile->archive_path);
     free(vfile->archive_filename);
     pthread_mutex_destroy(&vfile->lock);
@@ -272,6 +273,10 @@ static int _open_archive(struct virtual_file *vfile)
     vfile->archive_entry = find_archive_entry(vfile->archive, vfile->archive_filename);
 
     return 1;
+}
+static inline struct fifo_buf *alloc_file_buffer(void)
+{
+    return fifo_init(get_data()->file_buf_size);
 }
 
 static struct virtual_file *open_archive(const char *path)
@@ -302,7 +307,6 @@ static struct virtual_file *open_archive(const char *path)
         return NULL;
     }
 
-    vfile->buf = fifo_init(get_data()->file_buf_size);
     pthread_mutex_init(&vfile->lock, NULL);
 
     return vfile;
@@ -435,6 +439,9 @@ static int read_vfile_buf(
         goto done;
     }
 
+    if (!file->buf && (file->buf = alloc_file_buffer()) == NULL)
+        return -ENOMEM;
+
     if (fifo_curr_pos(file->buf) != offset)
         if ((ret = vfile_seek(file, offset)) < 0)
             goto done;
@@ -480,6 +487,9 @@ static int read_vfile(struct virtual_file *vfile, void *buf, size_t size, off_t 
     int bytes_read;
     int8_t *bufptr = buf;
     debug("reading at most %lu bytes into %p from offset %lu\n", size, buf, offset);
+
+    if (!vfile->buf && (vfile->buf = alloc_file_buffer()) == NULL)
+        return -ENOMEM;
 
     if (fifo_curr_pos(vfile->buf) != offset)
         if (!vfile_seek(vfile, offset))
