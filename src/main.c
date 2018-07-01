@@ -1,25 +1,22 @@
 #define _GNU_SOURCE
 #include <stdio.h>
+#include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
+#include <fuse_opt.h>
 #include <getopt.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include "decompress-fs.h"
 
-struct {
-    char *source_dir, *mountpoint;
-
-    char *fuse_args[32];
-    int num_fuse_args;
-
-    int file_buf_size; // defaults to 512 MiB
+struct decompressfs {
+    char *source_dir;
+    char *mountpoint;
+    int file_buf_size;
     int foreground;
-} options = {.source_dir = NULL,
-    .mountpoint = NULL,
-    .num_fuse_args = 0,
-    .file_buf_size = 512 * 1024 * 1024,
-    .foreground = 0};
+    int help;
+} decompressfs = {.file_buf_size = 512 * 1024 * 1024 }; // default to 512 MiB
 
 struct fuse_operations ops = {
     .opendir = do_opendir,
@@ -32,57 +29,50 @@ struct fuse_operations ops = {
     .access = do_access,
 };
 
-void usage(char **argv, struct option *options)
-{
-    int i;
+enum { KEY_BUFFER_SIZE };
 
-    printf("USAGE: %s <options> [SOURCE DIRECTORY] [MOUNTPOINT]\n", argv[0]);
-    printf("Available options:\n");
-    for (i = 0; options[i].name; i++)
-        printf("    -%c, --%s %s\n", options[i].val, options[i].name,
-            options[i].has_arg == required_argument ? "<argument>" : "");
-}
-
-void parse_args(int argc, char **argv)
-{
-    int c, i, option_index;
-    struct option long_options[] = {
-        {"foreground", no_argument, NULL, 'f'},
-        {"buffer-size", required_argument, NULL, 's'},
-        {NULL, 0, NULL, 0},
-    };
-
-    options.fuse_args[options.num_fuse_args++] = argv[0];
-    options.fuse_args[options.num_fuse_args++] = "-o";
-    options.fuse_args[options.num_fuse_args++] = "ro";
-    options.fuse_args[options.num_fuse_args++] = "-o";
-    options.fuse_args[options.num_fuse_args++] = "allow_other";
-
-    while ((c = getopt_long(argc, argv, "fs:", long_options, &option_index)) != -1) {
-        switch (c) {
-            case 'f':
-                options.foreground = 1;
-                break;
-            case 's':
-                options.file_buf_size = atoi(optarg);
-                if (options.file_buf_size < 1024) {
-                    fprintf(stderr, "Buffer size cant be less than 1024 bytes!\n");
-                    exit(1);
-                }
-            default:
-                usage(argv, long_options);
-                exit(0);
-        }
+#define DECOMFS_OPT(t, p, v)                                                                       \
+    {                                                                                              \
+        t, offsetof(struct decompressfs, p), v                                                     \
     }
 
-    for (i = optind; i < argc; ++i)
-        if (!options.source_dir)
-            options.source_dir = argv[i];
-        else
-            options.mountpoint = argv[i];
+static struct fuse_opt decompressfs_opts[] = {
 
-    if (!options.source_dir || !options.mountpoint) {
-        usage(argv, long_options);
+    DECOMFS_OPT("-h", help, 1),
+
+    DECOMFS_OPT("-f", foreground, 1),
+
+    FUSE_OPT_KEY("-s ", KEY_BUFFER_SIZE),
+
+    FUSE_OPT_KEY("rw", FUSE_OPT_KEY_DISCARD),
+
+    FUSE_OPT_END
+};
+
+static int fuse_opt_process(void *data, const char *arg, int key, struct fuse_args *outargs)
+{
+    switch (key) {
+    case FUSE_OPT_KEY_OPT:
+        return 1;
+    case FUSE_OPT_KEY_NONOPT:
+        if (!decompressfs.source_dir) {
+            decompressfs.source_dir = strdup(arg);
+            return 0;
+        } else if (!decompressfs.mountpoint) {
+            decompressfs.mountpoint = strdup(arg);
+            return 0;
+        }
+        fprintf(stderr, "decompressfs: invalid argument '%s'\n", arg);
+        return -1;
+    case KEY_BUFFER_SIZE:
+        sscanf(arg, "-s%d", &decompressfs.file_buf_size);
+        if (decompressfs.file_buf_size < 4096) {
+            fprintf(stderr, "Buffer size cannot be less than 4 KiB\n");
+            exit(1);
+        }
+        return 0;
+    default:
+        fprintf(stderr, "hmm, something is wrong..\n");
         exit(1);
     }
 }
@@ -92,29 +82,33 @@ int main(int argc, char *argv[])
     int ret;
     struct data d;
     struct fuse *f;
-    struct fuse_args args;
+    struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
-    parse_args(argc, argv);
-
-    d.root = open(options.source_dir, O_PATH);
-    d.root_path = options.source_dir;
-    d.file_buf_size = options.file_buf_size;
-
-    if (!d.root) {
-        fprintf(stderr, "failed to open source directory '%s'\n", options.source_dir);
+    if (fuse_opt_parse(&args, &decompressfs, decompressfs_opts, fuse_opt_process) == -1)
+        return 1;
+    if (!decompressfs.source_dir || !decompressfs.mountpoint) {
+        fprintf(stderr, "Error: source and/or mountpoint was not specified\n");
         return 1;
     }
 
-    args.argv = options.fuse_args;
-    args.argc = options.num_fuse_args;
-    args.allocated = 0;
+    if (fuse_opt_add_arg(&args, "-oro") == -1)
+        return 1;
+
+    d.root = open(decompressfs.source_dir, O_PATH);
+    d.root_path = decompressfs.source_dir;
+    d.file_buf_size = decompressfs.file_buf_size;
+
+    if (!d.root) {
+        fprintf(stderr, "failed to open source directory '%s'\n", decompressfs.source_dir);
+        return 1;
+    }
 
     f = fuse_new(&args, &ops, sizeof(ops), &d);
-    fuse_mount(f, (const char *)options.mountpoint);
-    fuse_daemonize(options.foreground);
+    fuse_mount(f, (const char *)decompressfs.mountpoint);
+    fuse_daemonize(decompressfs.foreground);
     fuse_set_signal_handlers(fuse_get_session(f));
 
-    ret = fuse_loop_mt_31(f, 1);
+    ret = fuse_loop_mt(f, 1);
 
     fuse_remove_signal_handlers(fuse_get_session(f));
     fuse_unmount(f);
