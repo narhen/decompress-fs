@@ -2,6 +2,7 @@
 #include "mem.h"
 #include "utils.h"
 #include "decompress-fs.h"
+#include <stdbool.h>
 #include <archive.h>
 #include <archive_entry.h>
 #include <dirent.h>
@@ -40,7 +41,7 @@ struct file {
     struct virtual_file *vfile;
 };
 
-static inline int supported_format(const char *filename)
+static inline bool supported_format(const char *filename)
 {
     return endswith_list(
         filename, supported_formats, sizeof(supported_formats) / sizeof(const char *));
@@ -84,32 +85,6 @@ static const char *get_path(const char *path)
         return path + 1;
 
     return path;
-}
-
-static const char *get_virtual_archive_file_name(const char *filename)
-{
-    const char *ret = strrchr(filename, ':');
-
-    if (!ret)
-        return NULL;
-    return ret + 1;
-}
-
-static char *find_archive_for_file(const char *filename)
-{
-    struct stat info;
-    char *p;
-    char abspath[strlen(root_path()) + strlen(filename) + 2];
-
-    sprintf(abspath, "%s/%s", root_path(), filename);
-
-    while ((p = strrchr(abspath, ':'))) {
-        *p = 0;
-        if (!lstat(abspath, &info))
-            return strdup(abspath);
-    }
-
-    return NULL;
 }
 
 static int cmpstringp(const void *p1, const void *p2)
@@ -194,6 +169,60 @@ static struct archive *get_archive(const char *root, const char *path, const cha
     return _get_archive(filename);
 }
 
+static bool file_exists_in_archive(char *path, char *archive_name, char *filename)
+{
+    struct archive *a;
+    struct archive_entry *ent;
+    bool found = false;
+
+    a = get_archive(root_path(), path, archive_name);
+    if (a == NULL)
+        return false;
+
+    while (archive_read_next_header(a, &ent) == ARCHIVE_OK)
+        if (!strcmp(archive_entry_pathname(ent), filename)) {
+            found = true;
+            break;
+        }
+
+    archive_read_free(a);
+    return found;
+}
+
+static char *find_archive_for_file(const char *_filename)
+{
+    char *basedir, *filename;
+    struct dirent *dir;
+    char *ret = NULL;
+    int fd, buflen;
+    DIR *dp;
+
+    basedir = (char *)get_path(dirname(strdupa(_filename)));
+    filename = basename(strdupa(_filename));
+
+    if ((fd = openat(root_fd(), basedir, 0)) == -1)
+        return NULL;
+
+    if ((dp = fdopendir(fd)) == NULL) {
+        close(fd);
+        return NULL;
+    }
+
+    while ((dir = readdir(dp)) != NULL) {
+        if (!supported_format(dir->d_name)
+            || !file_exists_in_archive(basedir, dir->d_name, filename))
+            continue;
+
+        buflen = strlen(root_path()) + strlen(basedir) + strlen(dir->d_name) + 3;
+        if ((ret = calloc(1, buflen)) != NULL)
+            sprintf(ret, "%s/%s/%s", root_path(), basedir, dir->d_name);
+        break;
+    }
+
+    closedir(dp);
+    return ret;
+}
+
 static struct archive_entry *find_archive_entry(struct archive *a, const char *filename)
 {
     struct archive_entry *ent;
@@ -259,7 +288,7 @@ static struct virtual_file *open_archive(const char *path)
         return NULL;
     }
 
-    vfile->archive_filename = strdup(get_virtual_archive_file_name(path));
+    vfile->archive_filename = strdup(basename(strdupa(path)));
     if (!vfile->archive_filename) {
         free(vfile->archive_path);
         free(vfile);
@@ -345,7 +374,7 @@ static int vfile_read(struct virtual_file *vfile, size_t size, char *dest_buf)
         else if (res < 0) {
             debug("archive_read_data_block: %s\n", archive_error_string(vfile->archive));
             bytes_read = -EOF;
-            goto done;
+            break;
         }
 
         if (dest_buf) {
@@ -361,7 +390,6 @@ static int vfile_read(struct virtual_file *vfile, size_t size, char *dest_buf)
             bytes_read += res;
     }
 
-done:
     free(mem);
     return bytes_read;
 }
@@ -548,15 +576,13 @@ static int fill_compressed_files(
 {
     struct archive *a;
     struct archive_entry *ent;
-    char filename[1024];
 
     a = get_archive(root_path(), path, archive_name);
     if (a == NULL)
         return -errno;
 
     while (archive_read_next_header(a, &ent) == ARCHIVE_OK) {
-        sprintf(filename, "%s:%s", archive_name, archive_entry_pathname(ent));
-        if (filler(buf, filename, NULL, 0, 0)) {
+        if (filler(buf, archive_entry_pathname(ent), NULL, 0, 0)) {
             archive_read_free(a);
             return 0;
         }
@@ -594,7 +620,7 @@ int do_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset
 static int archive_stat(const char *archive_filename, struct stat *info)
 {
     char *archive_name = find_archive_for_file(archive_filename);
-    const char *filename = get_virtual_archive_file_name(archive_filename);
+    const char *filename = basename(strdupa(archive_filename));
     struct archive *archive;
     struct archive_entry *correct_ent = NULL;
     int ret = 0;

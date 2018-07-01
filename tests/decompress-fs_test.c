@@ -21,9 +21,9 @@
 #define ROOT "../tests/data"
 #define MOUNTPOINT "../tests/mnt"
 #define FIFO_BUF_SIZE 128
-#define DECOMPRESSED_FILE "data.bin"
+#define DECOMPRESSED_FILE "data.bin.original"
 #define COMPRESSED_FILE "data.bin.tar.bz2"
-#define VIRTUAL_FILE "data.bin.tar.bz2:data.bin"
+#define VIRTUAL_FILE "data.bin"
 
 char root_dir[PATH_MAX];
 char mountpoint[PATH_MAX];

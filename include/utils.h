@@ -2,6 +2,7 @@
 #define __UTILS_H
 
 #include <dirent.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -17,15 +18,15 @@
 #define MOD(a, b) ((((a) % (b)) + (b)) % (b))
 
 #ifdef DEBUG
-void _debug_print(const char *function, char *fmt, ...);
-#define debug(fmt, ...) _debug_print(__FUNCTION__, fmt, ##__VA_ARGS__)
+void _debug_print(const char *function, int line, char *fmt, ...);
+#define debug(fmt, ...) _debug_print(__FUNCTION__, __LINE__, fmt, ##__VA_ARGS__)
 #else
 #define debug(fmt, ...)
 #endif
 
-extern int endswith(const char *str, const char *p);
-extern int endswith_list(const char *str, const char *ps[], size_t ps_len);
-extern int startswith(const char *str, const char *p);
+extern bool endswith(const char *str, const char *p);
+extern bool endswith_list(const char *str, const char *ps[], size_t ps_len);
+extern bool startswith(const char *str, const char *p);
 
 static inline int struct_dirent_size(const char *path)
 {

@@ -15,6 +15,7 @@ struct decompressfs {
     char *mountpoint;
     int file_buf_size;
     int foreground;
+    int singlethreaded;
     int help;
 } decompressfs = {.file_buf_size = 512 * 1024 * 1024 }; // default to 512 MiB
 
@@ -37,10 +38,11 @@ enum { KEY_BUFFER_SIZE };
     }
 
 static struct fuse_opt decompressfs_opts[] = {
-
     DECOMFS_OPT("-h", help, 1),
 
     DECOMFS_OPT("-f", foreground, 1),
+
+    DECOMFS_OPT("-S", singlethreaded, 1),
 
     FUSE_OPT_KEY("-s ", KEY_BUFFER_SIZE),
 
@@ -108,7 +110,10 @@ int main(int argc, char *argv[])
     fuse_daemonize(decompressfs.foreground);
     fuse_set_signal_handlers(fuse_get_session(f));
 
-    ret = fuse_loop_mt(f, 1);
+    if (decompressfs.singlethreaded)
+        ret = fuse_loop(f);
+    else
+        ret = fuse_loop_mt(f, 1);
 
     fuse_remove_signal_handlers(fuse_get_session(f));
     fuse_unmount(f);
