@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <unistd.h>
+#include "config.h"
 
 #define dirent_array_entry(dent_array, dent_size, entry_num)                                       \
     ((struct dirent *)(((uint8_t *)(dent_array)) + ((dent_size) * (entry_num))))

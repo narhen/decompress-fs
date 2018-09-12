@@ -1,7 +1,17 @@
 project('decompress-fs', 'c')
 add_global_arguments('-Werror', language: 'c')
 
-inc = [include_directories('include')]
+conf_data = configuration_data()
+conf_data.set('version', 'v0.1')
+if get_option('buildtype') == 'debug'
+    conf_data.set('DEBUG', true)
+endif
+configure_file(input: 'config.h.in',
+                   output: 'config.h',
+                   configuration: conf_data)
+
+
+inc = [include_directories('.'), include_directories('include')]
 sources = []
 header_files = []
 test_sources = []
@@ -12,17 +22,10 @@ subdir('tests')
 
 dependencies = [dependency('fuse3'), dependency('libarchive')]
 
-conf_data = configuration_data()
-conf_data.set('version', '0.1')
-configure_file(input: 'config.h.in',
-                   output: 'config.h',
-                   configuration: conf_data)
-
 executable('decompressfs',
            sources + [main],
            include_directories: inc,
-           dependencies: dependencies,
-           c_args: ['-DDEBUG'])
+           dependencies: dependencies)
 
 
 configure_file(input : '.clang-format',

@@ -11,7 +11,7 @@ decompress_fs_test = executable('decompress_fs_test',
     ['decompress-fs_test.c', sources],
     include_directories: inc,
     dependencies: test_dependencies,
-    c_args: ['-DINTEGRATION_TEST', '-DDEBUG'])
+    c_args: ['-DINTEGRATION_TEST'])
 
 test('mem test', mem_test)
 test('decompress-fs test', decompress_fs_test)
