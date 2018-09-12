@@ -28,9 +28,6 @@ executable('decompressfs',
            dependencies: dependencies)
 
 
-configure_file(input : '.clang-format',
-               output : '.clang-format',
-               configuration : configuration_data())
 run_target('format', command: [
     'clang-format',
     '-i',

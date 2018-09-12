@@ -18,8 +18,9 @@
 #include <sys/stat.h>
 #include <fuse.h>
 
-#define ROOT "../tests/data"
-#define MOUNTPOINT "../tests/mnt"
+#define TEST_ROOT "../tests"
+#define MOUNT_ROOT TEST_ROOT "/data"
+#define MOUNTPOINT TEST_ROOT "/mnt"
 #define FIFO_BUF_SIZE 128
 #define DECOMPRESSED_FILE "data.bin.original"
 #define COMPRESSED_FILE "data.bin.tar.bz2"
@@ -51,10 +52,12 @@ static struct fuse *setup(int *fs_pid)
     struct data d;
     char *argv[] = { "integration_test", "-o", "ro" };
 
-    realpath(ROOT, root_dir);
-    realpath(MOUNTPOINT, mountpoint);
+    mkdir(MOUNTPOINT, 0777);
 
-    mkdir(mountpoint, 0777);
+    if (!realpath(MOUNT_ROOT, root_dir) || !realpath(MOUNTPOINT, mountpoint)) {
+        perror("Failed to set up test (realpath)");
+        exit(1);
+    }
 
     d.root_path = root_dir;
     d.root = open(d.root_path, O_PATH);

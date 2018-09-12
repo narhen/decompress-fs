@@ -40,12 +40,19 @@ enum { KEY_BUFFER_SIZE };
     }
 
 static struct fuse_opt decompressfs_opts[] = {
+
     DECOMFS_OPT("-h", help, 1),
+
     DECOMFS_OPT("-v", version, 1),
+
     DECOMFS_OPT("-f", foreground, 1),
+
     DECOMFS_OPT("-S", singlethreaded, 1),
+
     FUSE_OPT_KEY("-s ", KEY_BUFFER_SIZE),
+
     FUSE_OPT_KEY("rw", FUSE_OPT_KEY_DISCARD),
+
     FUSE_OPT_END
 };
 
