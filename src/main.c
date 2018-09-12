@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "decompress-fs.h"
+#include "config.h"
 
 struct decompressfs {
     char *source_dir;
@@ -17,6 +18,7 @@ struct decompressfs {
     int foreground;
     int singlethreaded;
     int help;
+    int version;
 } decompressfs = {.file_buf_size = 512 * 1024 * 1024 }; // default to 512 MiB
 
 struct fuse_operations ops = {
@@ -39,15 +41,11 @@ enum { KEY_BUFFER_SIZE };
 
 static struct fuse_opt decompressfs_opts[] = {
     DECOMFS_OPT("-h", help, 1),
-
+    DECOMFS_OPT("-v", version, 1),
     DECOMFS_OPT("-f", foreground, 1),
-
     DECOMFS_OPT("-S", singlethreaded, 1),
-
     FUSE_OPT_KEY("-s ", KEY_BUFFER_SIZE),
-
     FUSE_OPT_KEY("rw", FUSE_OPT_KEY_DISCARD),
-
     FUSE_OPT_END
 };
 
@@ -57,6 +55,7 @@ static void help(int argc, char **argv)
         argc > 0 ? argv[0] : "decompressfs");
     printf("Available options:\n");
     printf("    -h      - Show this help help\n");
+    printf("    -v      - Print version then exit\n");
     printf("    -f      - Run in foreground\n");
     printf("    -S      - Run one single thread\n");
     printf("    -s      - File Buffer size. Default is 512 MiB\n");
@@ -102,6 +101,11 @@ int main(int argc, char *argv[])
 
     if (decompressfs.help) {
         help(argc, argv);
+        return 0;
+    }
+
+    if (decompressfs.version) {
+        puts(VERSION_STR);
         return 0;
     }
 

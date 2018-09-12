@@ -1,5 +1,5 @@
 project('decompress-fs', 'c')
-add_global_arguments('-g', '-Werror', language: 'c')
+add_global_arguments('-Werror', language: 'c')
 
 inc = [include_directories('include')]
 sources = []
@@ -11,6 +11,12 @@ subdir('include')
 subdir('tests')
 
 dependencies = [dependency('fuse3'), dependency('libarchive')]
+
+conf_data = configuration_data()
+conf_data.set('version', '0.1')
+configure_file(input: 'config.h.in',
+                   output: 'config.h',
+                   configuration: conf_data)
 
 executable('decompressfs',
            sources + [main],
