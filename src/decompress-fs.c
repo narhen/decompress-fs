@@ -99,6 +99,7 @@ static struct archive *_get_rar_archive(const char *abspath, struct archive *a)
     DIR *dp;
     int i, j, dirlen;
     char *multipart_archive_entries[2048]; // dynalloc pls
+    struct archive *ret = NULL;
 
     filename = basename(strdupa(abspath));
     dir = dirname(strdupa(abspath));
@@ -121,9 +122,10 @@ static struct archive *_get_rar_archive(const char *abspath, struct archive *a)
     if (i == 1) {
         if (archive_read_open_filename(a, multipart_archive_entries[1], 10240) != ARCHIVE_OK) {
             archive_read_free(a);
-            return NULL;
+            goto done;
         }
-        return a;
+        ret = a;
+        goto done;
     }
 
     qsort(&multipart_archive_entries[1], i - 1, sizeof(char *), cmpstringp);
@@ -133,13 +135,16 @@ static struct archive *_get_rar_archive(const char *abspath, struct archive *a)
     if (archive_read_open_filenames(a, (const char **)multipart_archive_entries, 10240)
         != ARCHIVE_OK) {
         archive_read_free(a);
-        return NULL;
+        goto done;
     }
 
     for (j = 0; j < i; j++)
         free(multipart_archive_entries[j]);
 
-    return a;
+    ret = a;
+done:
+    closedir(dp);
+    return ret;
 }
 
 static struct archive *_get_archive(const char *abspath)

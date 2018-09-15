@@ -19,7 +19,7 @@ struct decompressfs {
     int singlethreaded;
     int help;
     int version;
-} decompressfs = {.file_buf_size = 512 * 1024 * 1024 }; // default to 512 MiB
+} decompressfs = { .file_buf_size = 512 * 1024 * 1024 }; // default to 512 MiB
 
 struct fuse_operations ops = {
     .opendir = do_opendir,
