@@ -1,6 +1,8 @@
 # decompress-fs
 [![Build Status](https://travis-ci.org/narhen/decompress-fs.svg?branch=master)](https://travis-ci.org/narhen/decompress-fs)
 
+A passthrough [fuse](https://github.com/libfuse/libfuse) filesystem that decompresses archieved files on the fly
+
 ## Howto
 
 First:
