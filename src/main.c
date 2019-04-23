@@ -56,7 +56,7 @@ static struct fuse_opt decompressfs_opts[] = {
     FUSE_OPT_END
 };
 
-static void help(int argc, char **argv)
+static void help(int argc, char **argv, struct fuse_args *fargs)
 {
     printf("USAGE: %s <options> [SOURCE DIRECTORY] [MOUNTPOINT]\n",
         argc > 0 ? argv[0] : "decompressfs");
@@ -66,6 +66,8 @@ static void help(int argc, char **argv)
     printf("    -f      - Run in foreground\n");
     printf("    -S      - Run one single thread\n");
     printf("    -s      - File Buffer size. Default is 512 MiB\n");
+
+    fuse_lib_help(fargs);
 }
 
 static int fuse_opt_process(void *data, const char *arg, int key, struct fuse_args *outargs)
@@ -107,7 +109,7 @@ int main(int argc, char *argv[])
         return 1;
 
     if (decompressfs.help) {
-        help(argc, argv);
+        help(argc, argv, &args);
         return 0;
     }
 
@@ -118,7 +120,7 @@ int main(int argc, char *argv[])
 
     if (!decompressfs.source_dir || !decompressfs.mountpoint) {
         fprintf(stderr, "Error: source and/or mountpoint was not specified\n");
-        help(argc, argv);
+        help(argc, argv, &args);
         return 1;
     }
 
